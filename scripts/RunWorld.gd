@@ -16,6 +16,11 @@ const GIANT_RESONANCE_STEP := 10.0
 const GIANT_MONSTER_SCALE := 2.5
 const NORMAL_MONSTER_MIN_SCALE := 1.1
 const NORMAL_MONSTER_MAX_SCALE := 1.5
+const WORLD_SIZE_OPTIONS := [
+	{"name": "小型球", "scale": 1.3},
+	{"name": "中型球", "scale": 2.2},
+	{"name": "大型球", "scale": 3.0}
+]
 
 @export var world_rotation_speed := 0.5
 @export var giant_monster_world_rotation_speed := 0.1
@@ -52,9 +57,14 @@ var spawn_timer := 2.0
 var event_serial := 0
 var control_scheme := "mouse"
 var current_world_rotation_speed := 0.5
+var current_world_size_name := "小型球"
+var current_world_scale := 1.0
+var current_world_radius := WORLD_RADIUS
+var camera_reference_radius := WORLD_RADIUS
 var current_player_visual_forward_angle := 0.0
 var next_giant_resonance_threshold := 10.0
 var active_events: Array[Dictionary] = []
+var pending_resume_data := {}
 var stats := {
 	"resource_events": 0,
 	"mine_events": 0,
@@ -74,14 +84,17 @@ var danger_overlay: ColorRect
 
 
 func _ready() -> void:
+	randomize()
 	concentration = clampf(GameState.blue_concentration, 0.0, 100.0)
+	pending_resume_data = GameState.consume_resume_run_data()
+	_select_world_size()
 	_build_world()
 	_build_hud()
 	_restore_resume_state()
 	if elapsed > 0.0:
-		_log("繼續探索：已恢復撤退當下的紀錄。")
+		_log("繼續探索：已恢復撤退當下的紀錄。球體 %s x%.1f。" % [current_world_size_name, current_world_scale])
 	else:
-		_log("進入藍色寶石世界。觀察球體自動轉動與濃度消耗。")
+		_log("進入藍色寶石世界。球體 %s x%.1f，觀察球體自動轉動與濃度消耗。" % [current_world_size_name, current_world_scale])
 
 
 func _process(delta: float) -> void:
@@ -97,11 +110,34 @@ func _process(delta: float) -> void:
 	_update_hud()
 
 
+func _select_world_size() -> void:
+	if not pending_resume_data.is_empty():
+		current_world_size_name = pending_resume_data.get("world_size_name", current_world_size_name)
+		current_world_scale = float(pending_resume_data.get("world_scale", current_world_scale))
+		current_world_radius = float(pending_resume_data.get("world_radius", WORLD_RADIUS * current_world_scale))
+		camera_reference_radius = WORLD_RADIUS
+		return
+
+	var selected: Dictionary = WORLD_SIZE_OPTIONS.pick_random()
+	current_world_size_name = selected["name"]
+	current_world_scale = float(selected["scale"])
+	current_world_radius = WORLD_RADIUS * current_world_scale
+	camera_reference_radius = WORLD_RADIUS
+
+
+func _lane_step() -> float:
+	return LANE_STEP * current_world_scale
+
+
+func _player_move_limit() -> float:
+	return PLAYER_MOVE_LIMIT * current_world_scale
+
+
 func _build_world() -> void:
 	world_mesh = MeshInstance3D.new()
 	var sphere := SphereMesh.new()
-	sphere.radius = WORLD_RADIUS
-	sphere.height = WORLD_RADIUS * 2.0
+	sphere.radius = current_world_radius
+	sphere.height = current_world_radius * 2.0
 	sphere.radial_segments = 48
 	sphere.rings = 24
 	world_mesh.mesh = sphere
@@ -136,7 +172,7 @@ func _add_surface_grid() -> void:
 
 func _create_surface_grid_mesh() -> Mesh:
 	var mesh := ImmediateMesh.new()
-	var radius := WORLD_RADIUS + GRID_RADIUS_OFFSET
+	var radius := current_world_radius + GRID_RADIUS_OFFSET
 	var latitude_steps := 8
 	var longitude_steps := 24
 	var segment_steps := 96
@@ -175,7 +211,7 @@ func _grid_material() -> StandardMaterial3D:
 
 
 func _apply_camera_settings(camera: Camera3D) -> void:
-	var distance := WORLD_RADIUS * camera_distance_ratio
+	var distance := camera_reference_radius * camera_distance_ratio
 	camera.fov = camera_fov
 	var target := _get_camera_surface_anchor()
 	camera.position = Vector3(0, target.y + _camera_height_for_distance(distance), target.z + distance)
@@ -186,27 +222,27 @@ func _get_camera_surface_anchor() -> Vector3:
 	var planet_center := Vector3.ZERO
 	var player_position := _get_gameplay_player_position()
 	if player_position.distance_squared_to(planet_center) < 0.001:
-		player_position = Vector3(0, WORLD_RADIUS + 0.55, 0)
+		player_position = Vector3(0, current_world_radius + 0.55, 0)
 
 	var player_surface_normal := (player_position - planet_center).normalized()
 	var toward_center := -player_surface_normal
-	return player_position + toward_center * WORLD_RADIUS * camera_target_toward_center_ratio
+	return player_position + toward_center * current_world_radius * camera_target_toward_center_ratio
 
 
 func _get_gameplay_player_position() -> Vector3:
-	var local_radius := sqrt(maxf(WORLD_RADIUS * WORLD_RADIUS - lane_target * lane_target, 0.0))
+	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - lane_target * lane_target, 0.0))
 	return Vector3(lane_target, local_radius + 0.55, 0.0)
 
 
 func _get_visual_player_position() -> Vector3:
-	var local_radius := sqrt(maxf(WORLD_RADIUS * WORLD_RADIUS - lane_target * lane_target, 0.0))
+	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - lane_target * lane_target, 0.0))
 	var angle := -current_player_visual_forward_angle
 	return Vector3(lane_target, cos(angle) * local_radius + 0.55, sin(angle) * local_radius)
 
 
 func _camera_height_for_distance(distance: float) -> float:
 	var pitch_height := tan(deg_to_rad(camera_pitch_deg)) * distance
-	var min_height := WORLD_RADIUS * camera_height_ratio
+	var min_height := camera_reference_radius * camera_height_ratio
 	return maxf(pitch_height, min_height)
 
 
@@ -279,15 +315,17 @@ func _handle_input(delta: float) -> void:
 	var lateral_axis := Input.get_axis("move_left", "move_right")
 	if not is_zero_approx(lateral_axis):
 		control_scheme = "keyboard"
-		lane_target = clampf(lane_target + lateral_axis * LATERAL_SPEED * delta, -PLAYER_MOVE_LIMIT, PLAYER_MOVE_LIMIT)
+		var move_limit := _player_move_limit()
+		lane_target = clampf(lane_target + lateral_axis * LATERAL_SPEED * current_world_scale * delta, -move_limit, move_limit)
 	elif control_scheme == "mouse":
 		var viewport_width := float(get_viewport().get_visible_rect().size.x)
 		if viewport_width > 0.0:
 			var mouse_x := get_viewport().get_mouse_position().x
 			var mouse_ratio := clampf(mouse_x / viewport_width, 0.0, 1.0)
-			var mouse_target := lerpf(-PLAYER_MOVE_LIMIT, PLAYER_MOVE_LIMIT, mouse_ratio)
-			lane_target = move_toward(lane_target, mouse_target, LATERAL_SPEED * delta)
-	player_lane = clampi(roundi(lane_target / LANE_STEP), -1, 1)
+			var move_limit := _player_move_limit()
+			var mouse_target := lerpf(-move_limit, move_limit, mouse_ratio)
+			lane_target = move_toward(lane_target, mouse_target, LATERAL_SPEED * current_world_scale * delta)
+	player_lane = clampi(roundi(lane_target / _lane_step()), -1, 1)
 	if Input.is_action_just_pressed("dodge") and dodge_cooldown <= 0.0:
 		dodge_timer = 0.55
 		dodge_cooldown = 1.1
@@ -379,19 +417,9 @@ func _get_player_speed_multiplier() -> float:
 func _solve_camera_composition(camera: Camera3D) -> void:
 	camera.fov = camera_fov
 	camera.v_offset = 0.0
-	var distance := WORLD_RADIUS * camera_distance_ratio
+	var distance := camera_reference_radius * camera_distance_ratio
 	var target := _get_camera_surface_anchor()
 
-	for iteration in 6:
-		_apply_camera_transform(camera, target, distance)
-		_solve_player_screen_y_offset(camera)
-		var planet_top_y := _measure_planet_top_screen_y(camera)
-		var visible_height := 1.0 - planet_top_y
-		var top_error := planet_top_screen_y - planet_top_y
-		var visible_error := planet_visible_height_ratio - visible_height
-		distance = clampf(distance + top_error * WORLD_RADIUS * 1.8 - visible_error * WORLD_RADIUS * 1.2, WORLD_RADIUS * 0.75, WORLD_RADIUS * 3.0)
-
-	camera.v_offset = 0.0
 	_apply_camera_transform(camera, target, distance)
 	_solve_player_screen_y_offset(camera)
 	_print_camera_debug(camera)
@@ -403,23 +431,25 @@ func _apply_camera_transform(camera: Camera3D, target: Vector3, distance: float)
 
 
 func _solve_player_screen_y_offset(camera: Camera3D) -> void:
-	var step := 0.1
-	for iteration in 5:
+	var step := maxf(camera_reference_radius * 0.02, 0.1)
+	var max_correction := camera_reference_radius * 1.5
+	var camera_up := camera.global_transform.basis.y.normalized()
+	for iteration in 8:
 		var current_y := _normalized_screen_y(camera, _get_gameplay_player_position())
 		var error := player_screen_y - current_y
 		if absf(error) < 0.005:
 			return
 
-		var base_offset := camera.v_offset
-		camera.v_offset = base_offset + step
+		var base_position := camera.global_position
+		camera.global_position = base_position + camera_up * step
 		var stepped_y := _normalized_screen_y(camera, _get_gameplay_player_position())
 		var derivative := (stepped_y - current_y) / step
-		camera.v_offset = base_offset
+		camera.global_position = base_position
 
 		if absf(derivative) < 0.0001:
-			camera.v_offset = clampf(base_offset + error * 4.0, -10.0, 10.0)
+			camera.global_position = base_position + camera_up * clampf(error * current_world_radius, -max_correction, max_correction)
 		else:
-			camera.v_offset = clampf(base_offset + error / derivative, -10.0, 10.0)
+			camera.global_position = base_position + camera_up * clampf(error / derivative, -max_correction, max_correction)
 
 
 func _normalized_screen_y(camera: Camera3D, world_position: Vector3) -> float:
@@ -431,9 +461,9 @@ func _measure_planet_top_screen_y(camera: Camera3D) -> float:
 	var top_y := INF
 	for x_index in range(-4, 5):
 		for z_index in range(-4, 5):
-			var x := float(x_index) / 4.0 * WORLD_RADIUS
-			var z := float(z_index) / 4.0 * WORLD_RADIUS
-			var remaining := WORLD_RADIUS * WORLD_RADIUS - x * x - z * z
+			var x := float(x_index) / 4.0 * current_world_radius
+			var z := float(z_index) / 4.0 * current_world_radius
+			var remaining := current_world_radius * current_world_radius - x * x - z * z
 			if remaining < 0.0:
 				continue
 			var point := Vector3(x, sqrt(remaining), z)
@@ -460,13 +490,15 @@ func _update_hud() -> void:
 	var module_name: String = GameState.get_selected_module_data()["name"]
 	var control_text := "鍵盤" if control_scheme == "keyboard" else "滑鼠"
 	var slow_text := "慢速中" if Input.is_action_pressed("slow_down") else "一般"
-	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n方向 %d / 控制 %s / 速度 %.0f%% %s / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
+	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s / 球體 %s x%.1f\n方向 %d / 控制 %s / 速度 %.0f%% %s / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
 		_format_time(elapsed),
 		concentration,
 		resonance_gained,
 		resources,
 		mine_points,
 		module_name,
+		current_world_size_name,
+		current_world_scale,
 		player_lane,
 		control_text,
 		_get_player_speed_multiplier() * 100.0,
@@ -500,7 +532,7 @@ func _create_event(event_type: String, lane: int, angle: float, is_giant := fals
 		marker.scale = Vector3.ONE * size_multiplier
 	add_child(marker)
 
-	var start_x := float(lane) * LANE_STEP
+	var start_x := float(lane) * _lane_step()
 	var event := {
 		"type": event_type,
 		"lane": lane,
@@ -514,8 +546,8 @@ func _create_event(event_type: String, lane: int, angle: float, is_giant := fals
 
 
 func _position_event(event: Dictionary) -> void:
-	var x: float = event.get("x", float(event["lane"]) * LANE_STEP)
-	var local_radius := sqrt(maxf(WORLD_RADIUS * WORLD_RADIUS - x * x, 0.0))
+	var x: float = event.get("x", float(event["lane"]) * _lane_step())
+	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - x * x, 0.0))
 	var angle: float = event["angle"]
 	var marker: MeshInstance3D = event["node"]
 	marker.position = Vector3(x, cos(angle) * local_radius + 0.18, sin(angle) * local_radius)
@@ -525,10 +557,10 @@ func _position_event(event: Dictionary) -> void:
 func _update_monster_chase(event: Dictionary, delta: float) -> void:
 	if event["type"] != "monster":
 		return
-	var monster_x: float = event.get("x", float(event["lane"]) * LANE_STEP)
+	var monster_x: float = event.get("x", float(event["lane"]) * _lane_step())
 	monster_x = move_toward(monster_x, lane_target, MONSTER_CHASE_SPEED * delta)
 	event["x"] = monster_x
-	event["lane"] = clampi(roundi(monster_x / LANE_STEP), -1, 1)
+	event["lane"] = clampi(roundi(monster_x / _lane_step()), -1, 1)
 
 
 func _resolve_event(event: Dictionary) -> void:
@@ -625,6 +657,9 @@ func _finish_run(reason: String) -> void:
 		"restoration_gained": restoration_gained,
 		"player_lane": player_lane,
 		"lane_target": lane_target,
+		"world_size_name": current_world_size_name,
+		"world_scale": current_world_scale,
+		"world_radius": current_world_radius,
 		"spawn_timer": spawn_timer,
 		"next_giant_resonance_threshold": next_giant_resonance_threshold
 	}
@@ -725,7 +760,8 @@ func _material(color: Color) -> StandardMaterial3D:
 
 
 func _restore_resume_state() -> void:
-	var data := GameState.consume_resume_run_data()
+	var data := pending_resume_data
+	pending_resume_data = {}
 	if data.is_empty():
 		return
 
@@ -737,7 +773,10 @@ func _restore_resume_state() -> void:
 	elapsed = data.get("elapsed", elapsed)
 	entered_danger = data.get("entered_danger", entered_danger)
 	player_lane = data.get("player_lane", player_lane)
-	lane_target = data.get("lane_target", player_lane * LANE_STEP)
+	lane_target = data.get("lane_target", player_lane * _lane_step())
+	current_world_size_name = data.get("world_size_name", current_world_size_name)
+	current_world_scale = float(data.get("world_scale", current_world_scale))
+	current_world_radius = float(data.get("world_radius", current_world_radius))
 	spawn_timer = data.get("spawn_timer", spawn_timer)
 	next_giant_resonance_threshold = data.get("next_giant_resonance_threshold", _next_giant_threshold_after(resonance_gained))
 	for key in stats.keys():

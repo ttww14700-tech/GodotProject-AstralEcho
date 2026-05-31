@@ -15,4 +15,4 @@ player_screen_y = 0.73
 player_visual_forward_angle_max = 0.1
 player_visual_forward_shift_speed = 0.5
 planet_visible_height_ratio = 0.5
-camera_fov = 55.0
+camera_fov = 25.0

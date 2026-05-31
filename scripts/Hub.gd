@@ -86,7 +86,7 @@ func _build_ui() -> void:
 	root.add_child(start_button)
 
 	var controls := Label.new()
-	controls.text = "局內操作：A/D、←/→ 或滑鼠控制左右方向，W 長按前移角色視覺，S 長按減速，Space 迴避閃過事件，F 使用技能，B 提前撤退。"
+	controls.text = "局內操作：A/D、←/→ 或滑鼠控制左右方向，雙擊 A/D 可短距離閃避，W 長按前移角色視覺，S 長按減速並後退角色視覺，Space 迴避閃過事件，F 使用技能，B 提前撤退。"
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	root.add_child(controls)
 	_apply_font_size(root)

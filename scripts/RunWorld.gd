@@ -35,7 +35,12 @@ const WORLD_SIZE_OPTIONS := [
 @export var planet_top_screen_y := 0.56
 @export var player_screen_y := 0.62
 @export var player_visual_forward_angle_max := 0.18
+@export var player_visual_backward_angle_max := 0.06
 @export var player_visual_forward_shift_speed := 3.33
+@export var lane_dash_double_tap_window := 0.28
+@export var lane_dash_distance_ratio := 0.5
+@export var lane_dash_duration := 0.18
+@export var lane_dash_cooldown_duration := 0.45
 @export var planet_visible_height_ratio := 0.58
 @export var camera_fov := 48.0
 
@@ -62,6 +67,15 @@ var current_world_scale := 1.0
 var current_world_radius := WORLD_RADIUS
 var camera_reference_radius := WORLD_RADIUS
 var current_player_visual_forward_angle := 0.0
+var last_left_tap_time := -999.0
+var last_right_tap_time := -999.0
+var lane_dash_elapsed := 0.0
+var lane_dash_cooldown := 0.0
+var lane_dash_start := 0.0
+var lane_dash_target := 0.0
+var lane_dash_distance_multiplier := 1.0
+var lane_dash_duration_multiplier := 1.0
+var lane_dash_cooldown_multiplier := 1.0
 var next_giant_resonance_threshold := 10.0
 var active_events: Array[Dictionary] = []
 var pending_resume_data := {}
@@ -299,7 +313,7 @@ func _build_hud() -> void:
 	layer.add_child(controls_panel)
 
 	var controls := Label.new()
-	controls.text = "基礎操作\nA/D 或 ←/→：鍵盤接管左右移動\n移動滑鼠：滑鼠接管左右方向\nW：長按前移角色視覺\nS：長按減速\nSpace：迴避閃過事件\nF：使用技能\nB：提前撤退"
+	controls.text = "基礎操作\nA/D 或 ←/→：左右移動，雙擊 A/D 可短距離閃避\n移動滑鼠：滑鼠接管左右方向\nW：長按前移角色視覺\nS：長按減速並後退角色視覺\nSpace：迴避閃過事件\nF：使用技能\nB：提前撤退"
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	controls_panel.add_child(controls)
 
@@ -312,6 +326,11 @@ func _input(event: InputEvent) -> void:
 
 
 func _handle_input(delta: float) -> void:
+	_handle_lane_dash_taps()
+	if lane_dash_elapsed > 0.0:
+		_update_lane_dash(delta)
+		return
+
 	var lateral_axis := Input.get_axis("move_left", "move_right")
 	if not is_zero_approx(lateral_axis):
 		control_scheme = "keyboard"
@@ -339,15 +358,80 @@ func _handle_input(delta: float) -> void:
 		_finish_run("提前撤退")
 
 
+func _handle_lane_dash_taps() -> void:
+	if Input.is_action_just_pressed("move_left"):
+		control_scheme = "keyboard"
+		var previous_tap := last_left_tap_time
+		last_left_tap_time = elapsed
+		if elapsed - previous_tap <= lane_dash_double_tap_window:
+			_try_start_lane_dash(-1)
+	if Input.is_action_just_pressed("move_right"):
+		control_scheme = "keyboard"
+		var previous_tap := last_right_tap_time
+		last_right_tap_time = elapsed
+		if elapsed - previous_tap <= lane_dash_double_tap_window:
+			_try_start_lane_dash(1)
+
+
+func _try_start_lane_dash(direction: int) -> void:
+	if lane_dash_cooldown > 0.0:
+		return
+	var move_limit := _player_move_limit()
+	var dash_distance := _get_lane_dash_distance()
+	var target := clampf(lane_target + float(direction) * dash_distance, -move_limit, move_limit)
+	if is_equal_approx(target, lane_target):
+		return
+
+	lane_dash_elapsed = _get_lane_dash_duration()
+	lane_dash_cooldown = _get_lane_dash_cooldown_duration()
+	lane_dash_start = lane_target
+	lane_dash_target = target
+	player_lane = clampi(roundi(lane_dash_target / _lane_step()), -1, 1)
+	_log("短距離閃避：方向 %d，距離 %.0f%% lane。" % [direction, lane_dash_distance_ratio * lane_dash_distance_multiplier * 100.0])
+
+
+func _update_lane_dash(delta: float) -> void:
+	var duration := maxf(_get_lane_dash_duration(), 0.001)
+	lane_dash_elapsed = maxf(lane_dash_elapsed - delta, 0.0)
+	var progress := 1.0 - lane_dash_elapsed / duration
+	lane_target = lerpf(lane_dash_start, lane_dash_target, progress)
+	if lane_dash_elapsed <= 0.0:
+		lane_target = lane_dash_target
+	player_lane = clampi(roundi(lane_target / _lane_step()), -1, 1)
+
+
+func _get_lane_dash_distance() -> float:
+	return _lane_step() * lane_dash_distance_ratio * lane_dash_distance_multiplier
+
+
+func _get_lane_dash_duration() -> float:
+	return lane_dash_duration * lane_dash_duration_multiplier
+
+
+func _get_lane_dash_cooldown_duration() -> float:
+	return lane_dash_cooldown_duration * lane_dash_cooldown_multiplier
+
+
+func set_lane_dash_modifiers(distance_multiplier := 1.0, duration_multiplier := 1.0, cooldown_multiplier := 1.0) -> void:
+	lane_dash_distance_multiplier = maxf(distance_multiplier, 0.0)
+	lane_dash_duration_multiplier = maxf(duration_multiplier, 0.01)
+	lane_dash_cooldown_multiplier = maxf(cooldown_multiplier, 0.0)
+
+
 func _update_timers(delta: float) -> void:
 	dodge_timer = maxf(dodge_timer - delta, 0.0)
 	dodge_cooldown = maxf(dodge_cooldown - delta, 0.0)
 	skill_timer = maxf(skill_timer - delta, 0.0)
 	skill_cooldown = maxf(skill_cooldown - delta, 0.0)
+	lane_dash_cooldown = maxf(lane_dash_cooldown - delta, 0.0)
 
 
 func _update_player_visual_forward(delta: float) -> void:
-	var target := player_visual_forward_angle_max if Input.is_action_pressed("camera_push_forward") else 0.0
+	var target := 0.0
+	if Input.is_action_pressed("slow_down"):
+		target = -player_visual_backward_angle_max
+	elif Input.is_action_pressed("camera_push_forward"):
+		target = player_visual_forward_angle_max
 	current_player_visual_forward_angle = move_toward(current_player_visual_forward_angle, target, player_visual_forward_shift_speed * delta)
 
 

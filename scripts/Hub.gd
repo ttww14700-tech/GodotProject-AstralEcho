@@ -2,15 +2,33 @@ extends Control
 
 signal start_run
 
+const HUB_SPHERE_CONTROLLER := preload("res://scripts/HubSphereController.gd")
+
+@export var hub_player_move_speed := 2.0
+@export var hub_walk_radius := 6.0
+@export var hub_sphere_radius := 10.0
+@export var hub_camera_reference_radius := 10.0
+
 var module_buttons := {}
 var expectation_label: Label
 var save_label: Label
 var doctor_restore_button: Button
+var hub_sphere_controller: HubSphereController
 
 
 func _ready() -> void:
+	_build_hub_sphere()
 	_build_ui()
 	_refresh_ui()
+
+
+func _build_hub_sphere() -> void:
+	hub_sphere_controller = HUB_SPHERE_CONTROLLER.new()
+	hub_sphere_controller.player_move_speed = hub_player_move_speed
+	hub_sphere_controller.hub_walk_radius = hub_walk_radius
+	hub_sphere_controller.hub_sphere_radius = hub_sphere_radius
+	hub_sphere_controller.hub_camera_reference_radius = hub_camera_reference_radius
+	add_child(hub_sphere_controller)
 
 
 func _build_ui() -> void:

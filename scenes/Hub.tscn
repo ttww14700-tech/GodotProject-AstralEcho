@@ -1,8 +1,8 @@
-[gd_scene load_steps=2 format=3 uid="uid://astral_echo_hub"]
+[gd_scene format=3 uid="uid://bqjfsoh220us"]
 
-[ext_resource type="Script" path="res://scripts/Hub.gd" id="1"]
+[ext_resource type="Script" uid="uid://v3v41s7uhokh" path="res://scripts/Hub.gd" id="1"]
 
-[node name="Hub" type="Control"]
+[node name="Hub" type="Control" unique_id=1252811329]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -10,3 +10,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1")
+hub_player_move_speed = 6.0
+hub_walk_radius = 4.0
+hub_sphere_radius = 40.0

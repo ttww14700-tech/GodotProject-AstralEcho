@@ -1,6 +1,8 @@
 extends Node3D
 class_name HubSphereController
 
+signal central_tower_interaction_changed(active: bool)
+
 @export var godot_unit_meters := 1.0
 @export var player_height_units := 1.7
 @export var natural_step_distance := 0.65
@@ -9,11 +11,22 @@ class_name HubSphereController
 @export var short_dash_distance := 0.6
 @export var hub_sphere_radius := 10.0
 @export var hub_camera_reference_radius := 10.0
+@export var hub_camera_pitch_deg := 32.0
+@export var hub_camera_yaw_offset_deg := 30.0
+@export var hub_camera_distance := 21.0
+@export var hub_camera_height := 15.0
+@export var hub_camera_look_at_height := 1.4
+@export var hub_camera_follow_lerp_speed := 7.0
 @export var visual_rotation_multiplier := 0.35
 @export var player_move_speed := 2.0
 @export var hub_walk_radius := 6.0
+@export var central_tower_interaction_radius := 2.25
+@export var central_tower_interaction_height := 3.2
 @export var player_visual_offset_max := 0.4
 @export var player_visual_offset_follow_speed := 6.0
+@export var project_scene_primitives_to_sphere := true
+@export var hub_placement_plane_size := 12.0
+@export var show_hub_placement_plane_debug := true
 
 const PLAYER_RADIUS_RATIO := 0.16
 const CAMERA_DISTANCE_RATIO := 2.2
@@ -21,11 +34,27 @@ const CAMERA_HEIGHT_RATIO := 1.25
 const SURFACE_OFFSET := 0.02
 const GRID_RADIUS_OFFSET := 0.02
 const DEBUG_PANEL_WIDTH := 430.0
-const DEBUG_PANEL_HEIGHT := 360.0
+const DEBUG_PANEL_HEIGHT := 470.0
+const HUB_CAMERA_MODE := "Angled Mid Follow"
 const RECENT_MOVE_DEBUG_HOLD_TIME := 0.5
+const HUB_REFERENCE_BOX_SPECS := [
+	{"name": "CentralBlockTower", "offset": Vector2(0.0, -2.4), "size": Vector3(1.1, 2.6, 1.1)},
+	{"name": "NpcBlockA", "offset": Vector2(-2.2, -0.6), "size": Vector3(0.55, 0.85, 0.55)},
+	{"name": "NpcBlockB", "offset": Vector2(2.1, -0.4), "size": Vector3(0.55, 0.85, 0.55)},
+	{"name": "NpcBlockC", "offset": Vector2(-1.3, 2.0), "size": Vector3(0.55, 0.85, 0.55)},
+	{"name": "DoorFrameLeftPost", "offset": Vector2(2.8, 1.6), "size": Vector3(0.24, 1.25, 0.28)},
+	{"name": "DoorFrameRightPost", "offset": Vector2(3.6, 1.6), "size": Vector3(0.24, 1.25, 0.28)},
+	{"name": "DoorFrameTopBeam", "offset": Vector2(3.2, 1.6), "size": Vector3(1.08, 0.24, 0.28)},
+	{"name": "StepBlockA", "offset": Vector2(-3.0, 1.5), "size": Vector3(1.2, 0.16, 0.42)},
+	{"name": "StepBlockB", "offset": Vector2(-3.0, 1.95), "size": Vector3(1.2, 0.22, 0.42)},
+	{"name": "StepBlockC", "offset": Vector2(-3.0, 2.4), "size": Vector3(1.2, 0.28, 0.42)},
+	{"name": "StepBlockD", "offset": Vector2(-3.0, 2.85), "size": Vector3(1.2, 0.34, 0.42)}
+]
 
 var hub_sphere_visual: Node3D
 var hub_sphere_mesh: MeshInstance3D
+var hub_reference_visuals: Node3D
+var hub_placement_plane_debug: MeshInstance3D
 var player_node: Node3D
 var player_mesh: MeshInstance3D
 var camera_rig: Node3D
@@ -45,15 +74,23 @@ var recent_move_distance := 0.0
 var recent_rotation_radian := 0.0
 var recent_counter_axis := Vector3.ZERO
 var recent_visual_rotation := 0.0
+var camera_follow_position := Vector3.ZERO
+var camera_follow_target := Vector3.ZERO
+var camera_follow_initialized := false
+var central_tower_interaction_area: Area3D
+var central_tower_interaction_shape: CollisionShape3D
+var central_tower_interaction_active := false
 
 
 func _ready() -> void:
 	_build_hub_sphere()
 	_build_player()
+	_update_player_visual()
+	_setup_hub_reference_primitives()
+	_setup_placement_plane_debug()
 	_build_camera()
 	_build_light()
 	_build_debug_overlay()
-	_update_player_visual()
 	_update_debug_label()
 
 
@@ -61,6 +98,8 @@ func _process(delta: float) -> void:
 	_update_recent_move_debug_timer(delta)
 	_update_player_movement(delta)
 	_update_player_visual()
+	_update_central_tower_interaction()
+	_update_camera_transform(delta)
 	_update_debug_label()
 
 
@@ -134,6 +173,151 @@ func _build_player() -> void:
 	player_node.add_child(player_mesh)
 
 
+func _setup_hub_reference_primitives() -> void:
+	hub_reference_visuals = get_node_or_null("HubPrimitiveReferenceVisuals") as Node3D
+	if not hub_reference_visuals:
+		hub_reference_visuals = Node3D.new()
+		hub_reference_visuals.name = "HubPrimitiveReferenceVisuals"
+
+	var current_parent := hub_reference_visuals.get_parent()
+	if current_parent != hub_sphere_visual:
+		if current_parent:
+			current_parent.remove_child(hub_reference_visuals)
+		hub_sphere_visual.add_child(hub_reference_visuals)
+
+	var reference_material := _material(Color(0.42, 0.42, 0.42))
+	for box_spec in HUB_REFERENCE_BOX_SPECS:
+		_setup_reference_box(box_spec, reference_material)
+	if project_scene_primitives_to_sphere:
+		_project_reference_primitives_to_sphere()
+	_setup_central_tower_interaction_capsule()
+
+
+func _setup_reference_box(box_spec: Dictionary, material: Material) -> void:
+	var node_name := String(box_spec["name"])
+	var surface_offset := box_spec["offset"] as Vector2
+	var box_size := box_spec["size"] as Vector3
+	var mesh_instance := hub_reference_visuals.get_node_or_null(node_name) as MeshInstance3D
+	var created_from_spec := false
+	if not mesh_instance:
+		mesh_instance = MeshInstance3D.new()
+		mesh_instance.name = node_name
+		hub_reference_visuals.add_child(mesh_instance)
+		created_from_spec = true
+
+	if not mesh_instance.mesh:
+		var box := BoxMesh.new()
+		box.size = box_size
+		mesh_instance.mesh = box
+	if not mesh_instance.material_override:
+		mesh_instance.material_override = material
+
+	if created_from_spec:
+		mesh_instance.position = Vector3(surface_offset.x, 0.0, surface_offset.y)
+		mesh_instance.rotation = Vector3.ZERO
+
+
+func _project_reference_primitives_to_sphere() -> void:
+	if not hub_reference_visuals:
+		return
+
+	for child in hub_reference_visuals.get_children():
+		var mesh_instance := child as MeshInstance3D
+		if mesh_instance:
+			_project_reference_primitive_to_sphere(mesh_instance)
+
+
+func _project_reference_primitive_to_sphere(mesh_instance: MeshInstance3D) -> void:
+	var plane_position := mesh_instance.position
+	var plane_offset := Vector2(plane_position.x, plane_position.z)
+	var height_offset := plane_position.y
+	var editor_yaw := mesh_instance.rotation.y
+	var local_scale := mesh_instance.scale
+	var surface_position := _surface_position_from_offset(plane_offset)
+	var surface_normal := surface_position.normalized()
+	var mesh_half_height := _get_mesh_half_height(mesh_instance)
+
+	mesh_instance.position = surface_position + surface_normal * (mesh_half_height + height_offset)
+	mesh_instance.transform.basis = _basis_from_surface_normal_with_yaw(surface_normal, editor_yaw)
+	mesh_instance.scale = local_scale
+
+
+func _get_mesh_half_height(mesh_instance: MeshInstance3D) -> float:
+	if not mesh_instance.mesh:
+		return 0.0
+	return mesh_instance.mesh.get_aabb().size.y * absf(mesh_instance.scale.y) * 0.5
+
+
+func _setup_placement_plane_debug() -> void:
+	hub_placement_plane_debug = get_node_or_null("HubPlacementPlaneDebug") as MeshInstance3D
+	if not hub_placement_plane_debug:
+		hub_placement_plane_debug = MeshInstance3D.new()
+		hub_placement_plane_debug.name = "HubPlacementPlaneDebug"
+		add_child(hub_placement_plane_debug)
+
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(hub_placement_plane_size, hub_placement_plane_size)
+	hub_placement_plane_debug.mesh = plane
+	hub_placement_plane_debug.material_override = _placement_plane_material()
+	hub_placement_plane_debug.position = Vector3.ZERO
+	hub_placement_plane_debug.rotation = Vector3.ZERO
+	hub_placement_plane_debug.visible = show_hub_placement_plane_debug
+
+
+func _setup_central_tower_interaction_capsule() -> void:
+	var central_tower := hub_reference_visuals.get_node_or_null("CentralBlockTower") as Node3D
+	if not central_tower:
+		return
+
+	central_tower_interaction_area = central_tower.get_node_or_null("InteractionCapsule") as Area3D
+	if not central_tower_interaction_area:
+		central_tower_interaction_area = Area3D.new()
+		central_tower_interaction_area.name = "InteractionCapsule"
+		central_tower.add_child(central_tower_interaction_area)
+
+	central_tower_interaction_shape = central_tower_interaction_area.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if not central_tower_interaction_shape:
+		central_tower_interaction_shape = CollisionShape3D.new()
+		central_tower_interaction_shape.name = "CollisionShape3D"
+		central_tower_interaction_area.add_child(central_tower_interaction_shape)
+
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = central_tower_interaction_radius
+	capsule.height = central_tower_interaction_height
+	central_tower_interaction_shape.shape = capsule
+
+
+func _surface_position_from_offset(surface_offset: Vector2) -> Vector3:
+	var radius := maxf(hub_sphere_radius + SURFACE_OFFSET, 0.001)
+	var clamped_offset := surface_offset.limit_length(maxf(radius - 0.001, 0.0))
+	var surface_y := sqrt(maxf(radius * radius - clamped_offset.length_squared(), 0.0))
+	return Vector3(clamped_offset.x, surface_y, clamped_offset.y)
+
+
+func _update_central_tower_interaction() -> void:
+	var is_active := _is_player_inside_central_tower_capsule()
+	if is_active == central_tower_interaction_active:
+		return
+	central_tower_interaction_active = is_active
+	central_tower_interaction_changed.emit(central_tower_interaction_active)
+
+
+func _is_player_inside_central_tower_capsule() -> bool:
+	if not player_node or not central_tower_interaction_area:
+		return false
+
+	var tower_position := central_tower_interaction_area.global_position
+	var player_position := player_node.global_position
+	var tower_normal := tower_position.normalized()
+	if tower_normal.is_zero_approx():
+		tower_normal = Vector3.UP
+
+	var to_player := player_position - tower_position
+	var vertical_distance := to_player.dot(tower_normal)
+	var horizontal_distance := (to_player - tower_normal * vertical_distance).length()
+	return absf(vertical_distance) <= central_tower_interaction_height * 0.5 and horizontal_distance <= central_tower_interaction_radius
+
+
 func _build_camera() -> void:
 	camera_rig = Node3D.new()
 	camera_rig.name = "CameraRig"
@@ -144,7 +328,7 @@ func _build_camera() -> void:
 	hub_camera.fov = 38.0
 	hub_camera.current = true
 	camera_rig.add_child(hub_camera)
-	_update_camera_transform()
+	_update_camera_transform(0.0, true)
 
 
 func _build_light() -> void:
@@ -305,7 +489,12 @@ func _update_debug_label() -> void:
 	if not debug_label:
 		return
 
-	debug_label.text = "Hub Move Debug\nplayer_move_distance: %.4f\nsphere_radius: %.2f\nvisual_rotation_multiplier: %.2f\ncalculated_rotation_radian: %.5f\nhub_walk_radius: %.2f\nlogical_hub_position: (%.2f, %.2f)\nplayer_visual_offset: %.3f\nplayer_distance_from_hub_center: %.4f\nwalk_radius_limited: %s\ncounter_axis: (%.2f, %.2f, %.2f)\nrecent_hold: %.2f\nlast_input_dir: (%.2f, %.2f)\nlast_move_distance: %.4f\nlast_rotation_radian: %.5f\nlast_counter_axis: (%.2f, %.2f, %.2f)\nlast_visual_rotation: %.5f" % [
+	debug_label.text = "Hub Move Debug\nHub Camera: %s\ncamera_pitch_deg: %.2f\ncamera_yaw_offset_deg: %.2f\ncamera_distance: %.2f\ncamera_height: %.2f\nplayer_move_distance: %.4f\nsphere_radius: %.2f\nvisual_rotation_multiplier: %.2f\ncalculated_rotation_radian: %.5f\nhub_walk_radius: %.2f\nlogical_hub_position: (%.2f, %.2f)\nplayer_visual_offset: %.3f\nplayer_distance_from_hub_center: %.4f\nwalk_radius_limited: %s\ncounter_axis: (%.2f, %.2f, %.2f)\nrecent_hold: %.2f\nlast_input_dir: (%.2f, %.2f)\nlast_move_distance: %.4f\nlast_rotation_radian: %.5f\nlast_counter_axis: (%.2f, %.2f, %.2f)\nlast_visual_rotation: %.5f" % [
+		HUB_CAMERA_MODE,
+		hub_camera_pitch_deg,
+		hub_camera_yaw_offset_deg,
+		hub_camera_distance,
+		hub_camera_height,
 		last_player_move_distance,
 		hub_sphere_radius,
 		visual_rotation_multiplier,
@@ -357,15 +546,40 @@ func _basis_from_surface_normal(surface_normal: Vector3) -> Basis:
 	return Basis(right, up, forward)
 
 
-func _update_camera_transform() -> void:
-	var reference_radius := maxf(hub_camera_reference_radius, 0.001)
-	var distance := reference_radius * CAMERA_DISTANCE_RATIO
-	var surface_anchor_y := hub_sphere_radius
-	var height := surface_anchor_y + reference_radius * (CAMERA_HEIGHT_RATIO - 1.0)
-	var target := Vector3(0, surface_anchor_y - reference_radius * 0.45, 0)
+func _basis_from_surface_normal_with_yaw(surface_normal: Vector3, yaw: float) -> Basis:
+	var up := surface_normal.normalized()
+	return Basis(up, yaw) * _basis_from_surface_normal(up)
+
+
+func _update_camera_transform(delta: float, snap := false) -> void:
+	if not hub_camera:
+		return
+
+	var player_anchor := _get_hub_camera_anchor()
+	var yaw := deg_to_rad(hub_camera_yaw_offset_deg)
+	var camera_direction := Vector3(sin(yaw), 0.0, cos(yaw)).normalized()
+	var desired_position := player_anchor + camera_direction * hub_camera_distance + Vector3.UP * hub_camera_height
+	var pitch_drop := tan(deg_to_rad(hub_camera_pitch_deg)) * hub_camera_distance
+	var desired_target := Vector3(player_anchor.x, desired_position.y - pitch_drop + hub_camera_look_at_height, player_anchor.z)
+
+	if snap or not camera_follow_initialized:
+		camera_follow_position = desired_position
+		camera_follow_target = desired_target
+		camera_follow_initialized = true
+	else:
+		var follow_weight := clampf(delta * hub_camera_follow_lerp_speed, 0.0, 1.0)
+		camera_follow_position = camera_follow_position.lerp(desired_position, follow_weight)
+		camera_follow_target = camera_follow_target.lerp(desired_target, follow_weight)
+
 	camera_rig.position = Vector3.ZERO
-	hub_camera.position = Vector3(0, height, distance)
-	hub_camera.look_at(target, Vector3.UP)
+	hub_camera.global_position = camera_follow_position
+	hub_camera.look_at(camera_follow_target, Vector3.UP)
+
+
+func _get_hub_camera_anchor() -> Vector3:
+	if player_node:
+		return player_node.global_position
+	return Vector3(0.0, hub_sphere_radius + SURFACE_OFFSET, 0.0)
 
 
 func _material(color: Color) -> StandardMaterial3D:
@@ -380,4 +594,13 @@ func _grid_material() -> StandardMaterial3D:
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.albedo_color = Color(0.8, 0.9, 0.95, 0.18)
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return material
+
+
+func _placement_plane_material() -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(0.22, 0.62, 0.9, 0.18)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return material

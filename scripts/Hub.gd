@@ -8,12 +8,29 @@ const HUB_SPHERE_CONTROLLER := preload("res://scripts/HubSphereController.gd")
 @export var hub_walk_radius := 6.0
 @export var hub_sphere_radius := 10.0
 @export var hub_camera_reference_radius := 10.0
+@export var hub_camera_pitch_deg := 32.0
+@export var hub_camera_yaw_offset_deg := 30.0
+@export var hub_camera_distance := 21.0
+@export var hub_camera_height := 15.0
+@export var hub_camera_look_at_height := 1.4
+@export var hub_camera_follow_lerp_speed := 7.0
+@export var project_scene_primitives_to_sphere := true
+@export var hub_placement_plane_size := 12.0
+@export var show_hub_placement_plane_debug := true
 
 var module_buttons := {}
 var expectation_label: Label
 var save_label: Label
 var doctor_restore_button: Button
 var hub_sphere_controller: HubSphereController
+var hub_interaction_ui: Control
+var is_central_tower_interaction_active := false
+
+
+func _enter_tree() -> void:
+	_find_existing_hub_sphere()
+	if hub_sphere_controller:
+		_apply_hub_sphere_settings()
 
 
 func _ready() -> void:
@@ -23,16 +40,38 @@ func _ready() -> void:
 
 
 func _build_hub_sphere() -> void:
-	hub_sphere_controller = HUB_SPHERE_CONTROLLER.new()
+	if not hub_sphere_controller:
+		hub_sphere_controller = HUB_SPHERE_CONTROLLER.new()
+		hub_sphere_controller.name = "HubSphereController"
+		add_child(hub_sphere_controller)
+	_apply_hub_sphere_settings()
+	if not hub_sphere_controller.central_tower_interaction_changed.is_connected(_set_central_tower_interaction_active):
+		hub_sphere_controller.central_tower_interaction_changed.connect(_set_central_tower_interaction_active)
+
+
+func _find_existing_hub_sphere() -> void:
+	hub_sphere_controller = get_node_or_null("HubSphereController") as HubSphereController
+
+
+func _apply_hub_sphere_settings() -> void:
 	hub_sphere_controller.player_move_speed = hub_player_move_speed
 	hub_sphere_controller.hub_walk_radius = hub_walk_radius
 	hub_sphere_controller.hub_sphere_radius = hub_sphere_radius
 	hub_sphere_controller.hub_camera_reference_radius = hub_camera_reference_radius
-	add_child(hub_sphere_controller)
+	hub_sphere_controller.hub_camera_pitch_deg = hub_camera_pitch_deg
+	hub_sphere_controller.hub_camera_yaw_offset_deg = hub_camera_yaw_offset_deg
+	hub_sphere_controller.hub_camera_distance = hub_camera_distance
+	hub_sphere_controller.hub_camera_height = hub_camera_height
+	hub_sphere_controller.hub_camera_look_at_height = hub_camera_look_at_height
+	hub_sphere_controller.hub_camera_follow_lerp_speed = hub_camera_follow_lerp_speed
+	hub_sphere_controller.project_scene_primitives_to_sphere = project_scene_primitives_to_sphere
+	hub_sphere_controller.hub_placement_plane_size = hub_placement_plane_size
+	hub_sphere_controller.show_hub_placement_plane_debug = show_hub_placement_plane_debug
 
 
 func _build_ui() -> void:
 	var root := VBoxContainer.new()
+	hub_interaction_ui = root
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.offset_left = 32
 	root.offset_top = 28
@@ -108,6 +147,7 @@ func _build_ui() -> void:
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	root.add_child(controls)
 	_apply_font_size(root)
+	_set_central_tower_interaction_active(false)
 
 
 func _select_module(module_key: String) -> void:
@@ -152,6 +192,12 @@ func _refresh_ui() -> void:
 		GameState.blue_restoration,
 		GameState.total_runs
 	]
+
+
+func _set_central_tower_interaction_active(active: bool) -> void:
+	is_central_tower_interaction_active = active
+	if hub_interaction_ui:
+		hub_interaction_ui.visible = is_central_tower_interaction_active
 
 
 func _apply_font_size(node: Node) -> void:

@@ -14,6 +14,8 @@ const HUB_SPHERE_CONTROLLER := preload("res://scripts/HubSphereController.gd")
 @export var hub_camera_height := 15.0
 @export var hub_camera_look_at_height := 1.4
 @export var hub_camera_follow_lerp_speed := 7.0
+@export_range(0.0, 0.2, 0.01) var hub_camera_screen_offset_y := 0.12
+@export_range(30.0, 75.0, 1.0) var hub_camera_fov := 52.0
 @export var project_scene_primitives_to_sphere := true
 @export var hub_placement_plane_size := 12.0
 @export var show_hub_placement_plane_debug := true
@@ -64,6 +66,8 @@ func _apply_hub_sphere_settings() -> void:
 	hub_sphere_controller.hub_camera_height = hub_camera_height
 	hub_sphere_controller.hub_camera_look_at_height = hub_camera_look_at_height
 	hub_sphere_controller.hub_camera_follow_lerp_speed = hub_camera_follow_lerp_speed
+	hub_sphere_controller.hub_camera_screen_offset_y = hub_camera_screen_offset_y
+	hub_sphere_controller.hub_camera_fov = hub_camera_fov
 	hub_sphere_controller.project_scene_primitives_to_sphere = project_scene_primitives_to_sphere
 	hub_sphere_controller.hub_placement_plane_size = hub_placement_plane_size
 	hub_sphere_controller.show_hub_placement_plane_debug = show_hub_placement_plane_debug

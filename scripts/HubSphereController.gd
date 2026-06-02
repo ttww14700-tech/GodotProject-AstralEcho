@@ -17,6 +17,8 @@ signal central_tower_interaction_changed(active: bool)
 @export var hub_camera_height := 15.0
 @export var hub_camera_look_at_height := 1.4
 @export var hub_camera_follow_lerp_speed := 7.0
+@export_range(0.0, 0.2, 0.01) var hub_camera_screen_offset_y := 0.12
+@export_range(30.0, 75.0, 1.0) var hub_camera_fov := 52.0
 @export var visual_rotation_multiplier := 0.35
 @export var player_move_speed := 2.0
 @export var hub_walk_radius := 6.0
@@ -33,8 +35,11 @@ const CAMERA_DISTANCE_RATIO := 2.2
 const CAMERA_HEIGHT_RATIO := 1.25
 const SURFACE_OFFSET := 0.02
 const GRID_RADIUS_OFFSET := 0.02
+const SURFACE_GRID_EXTENT_RATIO := 0.82
+const SURFACE_GRID_STEP := 4.0
+const SURFACE_GRID_SEGMENT_STEP := 1.0
 const DEBUG_PANEL_WIDTH := 430.0
-const DEBUG_PANEL_HEIGHT := 470.0
+const DEBUG_PANEL_HEIGHT := 490.0
 const HUB_CAMERA_MODE := "Angled Mid Follow"
 const RECENT_MOVE_DEBUG_HOLD_TIME := 0.5
 const HUB_REFERENCE_BOX_SPECS := [
@@ -132,30 +137,34 @@ func _add_surface_grid() -> void:
 func _create_surface_grid_mesh() -> Mesh:
 	var mesh := ImmediateMesh.new()
 	var radius := hub_sphere_radius + GRID_RADIUS_OFFSET
-	var latitude_steps := 10
-	var longitude_steps := 24
-	var segment_steps := 96
+	var extent := radius * SURFACE_GRID_EXTENT_RATIO
 
 	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
-	for lat_index in range(1, latitude_steps):
-		var theta := -PI * 0.5 + PI * float(lat_index) / float(latitude_steps)
-		var y := sin(theta) * radius
-		var ring_radius := cos(theta) * radius
-		for step in range(segment_steps):
-			var a := TAU * float(step) / float(segment_steps)
-			var b := TAU * float(step + 1) / float(segment_steps)
-			mesh.surface_add_vertex(Vector3(cos(a) * ring_radius, y, sin(a) * ring_radius))
-			mesh.surface_add_vertex(Vector3(cos(b) * ring_radius, y, sin(b) * ring_radius))
-
-	for lon_index in range(longitude_steps):
-		var phi := TAU * float(lon_index) / float(longitude_steps)
-		for step in range(segment_steps):
-			var theta_a := -PI * 0.5 + PI * float(step) / float(segment_steps)
-			var theta_b := -PI * 0.5 + PI * float(step + 1) / float(segment_steps)
-			mesh.surface_add_vertex(Vector3(cos(theta_a) * cos(phi) * radius, sin(theta_a) * radius, cos(theta_a) * sin(phi) * radius))
-			mesh.surface_add_vertex(Vector3(cos(theta_b) * cos(phi) * radius, sin(theta_b) * radius, cos(theta_b) * sin(phi) * radius))
+	var line_count := int(floor(extent * 2.0 / SURFACE_GRID_STEP))
+	for line_index in range(line_count + 1):
+		var offset := -extent + float(line_index) * SURFACE_GRID_STEP
+		_add_projected_grid_line(mesh, Vector2(offset, -extent), Vector2(offset, extent), radius)
+		_add_projected_grid_line(mesh, Vector2(-extent, offset), Vector2(extent, offset), radius)
 	mesh.surface_end()
 	return mesh
+
+
+func _add_projected_grid_line(mesh: ImmediateMesh, start: Vector2, end: Vector2, radius: float) -> void:
+	var length := start.distance_to(end)
+	var segments := maxi(1, int(ceil(length / SURFACE_GRID_SEGMENT_STEP)))
+	var previous := _surface_grid_point(start, radius)
+	for segment_index in range(1, segments + 1):
+		var t := float(segment_index) / float(segments)
+		var current := _surface_grid_point(start.lerp(end, t), radius)
+		mesh.surface_add_vertex(previous)
+		mesh.surface_add_vertex(current)
+		previous = current
+
+
+func _surface_grid_point(offset: Vector2, radius: float) -> Vector3:
+	var clamped_offset := offset.limit_length(maxf(radius - 0.001, 0.0))
+	var y := sqrt(maxf(radius * radius - clamped_offset.length_squared(), 0.0))
+	return Vector3(clamped_offset.x, y, clamped_offset.y)
 
 
 func _build_player() -> void:
@@ -325,7 +334,7 @@ func _build_camera() -> void:
 
 	hub_camera = Camera3D.new()
 	hub_camera.name = "HubCamera"
-	hub_camera.fov = 38.0
+	hub_camera.fov = hub_camera_fov
 	hub_camera.current = true
 	camera_rig.add_child(hub_camera)
 	_update_camera_transform(0.0, true)
@@ -489,12 +498,14 @@ func _update_debug_label() -> void:
 	if not debug_label:
 		return
 
-	debug_label.text = "Hub Move Debug\nHub Camera: %s\ncamera_pitch_deg: %.2f\ncamera_yaw_offset_deg: %.2f\ncamera_distance: %.2f\ncamera_height: %.2f\nplayer_move_distance: %.4f\nsphere_radius: %.2f\nvisual_rotation_multiplier: %.2f\ncalculated_rotation_radian: %.5f\nhub_walk_radius: %.2f\nlogical_hub_position: (%.2f, %.2f)\nplayer_visual_offset: %.3f\nplayer_distance_from_hub_center: %.4f\nwalk_radius_limited: %s\ncounter_axis: (%.2f, %.2f, %.2f)\nrecent_hold: %.2f\nlast_input_dir: (%.2f, %.2f)\nlast_move_distance: %.4f\nlast_rotation_radian: %.5f\nlast_counter_axis: (%.2f, %.2f, %.2f)\nlast_visual_rotation: %.5f" % [
+	debug_label.text = "Hub Move Debug\nHub Camera: %s\ncamera_pitch_deg: %.2f\ncamera_yaw_offset_deg: %.2f\ncamera_distance: %.2f\ncamera_height: %.2f\nhub_camera_screen_offset_y: %.2f\nhub_camera_fov: %.2f\nplayer_move_distance: %.4f\nsphere_radius: %.2f\nvisual_rotation_multiplier: %.2f\ncalculated_rotation_radian: %.5f\nhub_walk_radius: %.2f\nlogical_hub_position: (%.2f, %.2f)\nplayer_visual_offset: %.3f\nplayer_distance_from_hub_center: %.4f\nwalk_radius_limited: %s\ncounter_axis: (%.2f, %.2f, %.2f)\nrecent_hold: %.2f\nlast_input_dir: (%.2f, %.2f)\nlast_move_distance: %.4f\nlast_rotation_radian: %.5f\nlast_counter_axis: (%.2f, %.2f, %.2f)\nlast_visual_rotation: %.5f" % [
 		HUB_CAMERA_MODE,
 		hub_camera_pitch_deg,
 		hub_camera_yaw_offset_deg,
 		hub_camera_distance,
 		hub_camera_height,
+		hub_camera_screen_offset_y,
+		hub_camera_fov,
 		last_player_move_distance,
 		hub_sphere_radius,
 		visual_rotation_multiplier,
@@ -560,7 +571,8 @@ func _update_camera_transform(delta: float, snap := false) -> void:
 	var camera_direction := Vector3(sin(yaw), 0.0, cos(yaw)).normalized()
 	var desired_position := player_anchor + camera_direction * hub_camera_distance + Vector3.UP * hub_camera_height
 	var pitch_drop := tan(deg_to_rad(hub_camera_pitch_deg)) * hub_camera_distance
-	var desired_target := Vector3(player_anchor.x, desired_position.y - pitch_drop + hub_camera_look_at_height, player_anchor.z)
+	var screen_offset_lift := clampf(hub_camera_screen_offset_y, 0.0, 0.2) * hub_camera_distance
+	var desired_target := Vector3(player_anchor.x, desired_position.y - pitch_drop + hub_camera_look_at_height + screen_offset_lift, player_anchor.z)
 
 	if snap or not camera_follow_initialized:
 		camera_follow_position = desired_position

@@ -28,12 +28,28 @@ https://app.notion.com/p/GodotProject-AstralEcho-370dacf0068d80dd93b8f7286e4935d
   - https://www.notion.so/373dacf0068d8196b344de60ba67c86f
 - Hub 據點球、鏡頭、物件佈局邏輯屬於局外系統，不要影響 `RunWorld.gd` 或 `RunWorld.tscn`。
 - Hub camera 使用固定構圖參數，不因 `hub_sphere_radius` 變大而自動拉遠；球體出框可以接受，優先維持角色畫面大小與操作可讀性。
+- Hub camera 需保留 `hub_camera_fov` 與 `hub_camera_screen_offset_y` 可調；不要再把 `HubCamera.fov` 寫死在程式裡。
+- 目前接近範本的 Hub 構圖候選值：
+  - `hub_sphere_radius = 70.0`
+  - `hub_camera_pitch_deg = 31.0`
+  - `hub_camera_yaw_offset_deg = 6.0`
+  - `hub_camera_distance = 17.0`
+  - `hub_camera_height = 12.5`
+  - `hub_camera_look_at_height = 1.4`
+  - `hub_camera_screen_offset_y = 0.16`
+  - `hub_camera_fov = 44.0`
+- Hub 球面地板格線需使用「平面方格投影到球面」的方式，不要使用會在角色腳下匯聚的經緯線格線。
+- Hub 球面方格由 `HubSphereController.gd` 的 `SURFACE_GRID_EXTENT_RATIO`、`SURFACE_GRID_STEP`、`SURFACE_GRID_SEGMENT_STEP` 控制。
 - Hub 物件佈局採用「平面編輯，運行時投影到球面」：
   - 物件放在 `HubSphereController/HubPrimitiveReferenceVisuals` 底下。
   - 場景編輯時，`position.x` / `position.z` 是平面擺放座標。
   - 場景編輯時，`position.y` 是離球面的高度偏移；通常保持 `0`，代表底部貼球。
   - 運行時由 `HubSphereController.gd` 使用 Hub 球半徑將平面座標投影到球面。
   - 投影後物件 local Y 軸需對齊球面法線，`rotation.y` 作為平面朝向並轉為球面切線方向。
+- Hub 佈局目前以範本式灰模構圖為目標：
+  - 中央據點主物件放在玩家前方約 `z = -18 ~ -24`。
+  - 左右 landmark 分布在約 `x = -24 ~ 26`、`z = -20 ~ -22`。
+  - 前景左右方塊放在約 `x = ±18 ~ ±24`、`z = 12 ~ 16`，建立前景深度。
 - Hub root 與 `HubSphereController.gd` 需保留可調參數：
   - `project_scene_primitives_to_sphere`
   - `hub_placement_plane_size`
@@ -41,7 +57,10 @@ https://app.notion.com/p/GodotProject-AstralEcho-370dacf0068d80dd93b8f7286e4935d
   - `hub_player_move_speed`
   - `hub_walk_radius`
   - `hub_sphere_radius`
+  - `hub_camera_fov`
+  - `hub_camera_screen_offset_y`
 - 使用者已於 2026-06-02 測試確認：物件可直接移動到位置上，並可調整大小；目前版本可用。
+- 使用者已於 2026-06-03 要求依範本直接調整；目前版本包含球面方格地板、前景物件、中央基座與左右 landmark。
 
 ## Git 交接資訊
 

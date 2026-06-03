@@ -2,6 +2,8 @@ extends Node3D
 
 signal run_finished(result: Dictionary)
 
+const RUN_EVENT_PREVIEW_LAYER_SCRIPT := preload("res://scripts/RunEventPreviewLayer.gd")
+const RUN_EVENT_PREVIEW_LAYER_SCENE := preload("res://scenes/ui/RunEventPreviewLayer.tscn")
 const RUN_DURATION := 600.0
 const WORLD_RADIUS := 8.0
 const EVENT_TRIGGER_ANGLE := 0.08
@@ -16,6 +18,8 @@ const GIANT_RESONANCE_STEP := 10.0
 const GIANT_MONSTER_SCALE := 2.5
 const NORMAL_MONSTER_MIN_SCALE := 1.1
 const NORMAL_MONSTER_MAX_SCALE := 1.5
+const EVENT_SPAWN_ANGLE := -0.9
+const EVENT_GROUP_ANGLE_STEP := 0.08
 const WORLD_SIZE_OPTIONS := [
 	{"name": "小型球", "scale": 1.3},
 	{"name": "中型球", "scale": 2.2},
@@ -43,6 +47,19 @@ const WORLD_SIZE_OPTIONS := [
 @export var lane_dash_cooldown_duration := 0.45
 @export var planet_visible_height_ratio := 0.58
 @export var camera_fov := 48.0
+@export var event_preview_enabled := true
+@export var event_preview_layer_scene: PackedScene = RUN_EVENT_PREVIEW_LAYER_SCENE
+@export var event_preview_use_runworld_visual_overrides := false
+@export var event_preview_lead_angle := 1.4
+@export var event_preview_far_screen_y := 0.22
+@export var event_preview_near_screen_y := 0.42
+@export var event_preview_center_x := 0.50
+@export var event_preview_lane_screen_spacing := 0.12
+@export var event_preview_marker_size := 24.0
+@export var event_preview_position_lerp_speed := 3.0
+@export var event_preview_hide_progress := 0.12
+@export var event_preview_fade_progress := 0.08
+@export var event_preview_debug_enabled := false
 
 var concentration := 100.0
 var resonance_gained := 0.0
@@ -60,6 +77,8 @@ var skill_timer := 0.0
 var skill_cooldown := 0.0
 var spawn_timer := 2.0
 var event_serial := 0
+var preview_event_serial := 0
+var preview_group_serial := 0
 var control_scheme := "mouse"
 var current_world_rotation_speed := 0.5
 var current_world_size_name := "小型球"
@@ -78,6 +97,7 @@ var lane_dash_duration_multiplier := 1.0
 var lane_dash_cooldown_multiplier := 1.0
 var next_giant_resonance_threshold := 10.0
 var active_events: Array[Dictionary] = []
+var preview_event_queue: Array[Dictionary] = []
 var pending_resume_data := {}
 var stats := {
 	"resource_events": 0,
@@ -91,7 +111,9 @@ var stats := {
 var world_mesh: MeshInstance3D
 var player_mesh: MeshInstance3D
 var run_camera: Camera3D
+var event_preview_layer
 var camera_debug_timer := 0.0
+var event_preview_debug_timer := 0.0
 var hud_label: Label
 var log_label: Label
 var danger_overlay: ColorRect
@@ -170,10 +192,21 @@ func _build_world() -> void:
 	run_camera = Camera3D.new()
 	add_child(run_camera)
 	_apply_camera_settings(run_camera)
+	_build_event_preview_layer()
 
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-45, 20, 0)
 	add_child(light)
+
+
+func _build_event_preview_layer() -> void:
+	if event_preview_layer_scene:
+		event_preview_layer = event_preview_layer_scene.instantiate()
+	else:
+		event_preview_layer = RUN_EVENT_PREVIEW_LAYER_SCRIPT.new()
+	event_preview_layer.name = "RunEventPreviewLayer"
+	_apply_event_preview_layer_settings()
+	add_child(event_preview_layer)
 
 
 func _add_surface_grid() -> void:
@@ -450,6 +483,7 @@ func _update_run(delta: float) -> void:
 
 func _update_events(delta: float) -> void:
 	_update_world_rotation_speed()
+	_update_preview_event_queue(delta)
 	spawn_timer -= delta
 	var spawn_interval := 6.5
 	if entered_danger:
@@ -468,6 +502,7 @@ func _update_events(delta: float) -> void:
 			_remove_event(event)
 		elif event["angle"] >= EVENT_EXPIRE_ANGLE:
 			_remove_event(event)
+	_print_event_preview_debug(delta)
 
 
 func _update_visuals(delta: float) -> void:
@@ -476,9 +511,66 @@ func _update_visuals(delta: float) -> void:
 	player_mesh.rotation_degrees.z = -lane_target * 4.0
 	if run_camera:
 		_solve_camera_composition(run_camera)
+		_sync_event_preview_layer(delta)
 
 	var danger_alpha := 0.13 if entered_danger else 0.0
 	danger_overlay.color = Color(0.6, 0.05, 0.1, danger_alpha)
+
+
+func _sync_event_preview_layer(delta: float) -> void:
+	if not event_preview_layer:
+		return
+	_apply_event_preview_layer_settings()
+	event_preview_layer.sync_preview_events(preview_event_queue, delta)
+
+
+func _apply_event_preview_layer_settings() -> void:
+	if not event_preview_layer:
+		return
+	event_preview_layer.enabled = event_preview_enabled
+	if not event_preview_use_runworld_visual_overrides:
+		return
+	event_preview_layer.far_screen_y = event_preview_far_screen_y
+	event_preview_layer.near_screen_y = event_preview_near_screen_y
+	event_preview_layer.center_x = event_preview_center_x
+	event_preview_layer.lane_screen_spacing = event_preview_lane_screen_spacing
+	event_preview_layer.marker_size = event_preview_marker_size
+	event_preview_layer.position_lerp_speed = event_preview_position_lerp_speed
+	event_preview_layer.hide_progress = event_preview_hide_progress
+	event_preview_layer.fade_progress = event_preview_fade_progress
+
+
+func _print_event_preview_debug(delta: float) -> void:
+	if not event_preview_debug_enabled:
+		return
+	event_preview_debug_timer -= delta
+	if event_preview_debug_timer > 0.0:
+		return
+	event_preview_debug_timer = 0.5
+
+	var preview_rows := []
+	for preview_event in preview_event_queue:
+		preview_rows.append("%s lane=%s remaining=%.3f visible=%s" % [
+			String(preview_event.get("type", "?")),
+			str(preview_event.get("lane", "?")),
+			float(preview_event.get("preview_angle_remaining", 0.0)),
+			"YES" if event_preview_enabled else "NO"
+		])
+
+	var active_rows := []
+	for event in active_events:
+		active_rows.append("%s lane=%s angle=%.3f" % [
+			String(event.get("type", "?")),
+			str(event.get("lane", "?")),
+			float(event.get("angle", 0.0))
+		])
+
+	print("EventPreviewDebug active_events=%d preview_candidates=%d queue=[%s] active=[%s]" % [
+		active_events.size(),
+		preview_event_queue.size(),
+		"; ".join(preview_rows),
+		"; ".join(active_rows)
+	])
 
 
 func _update_world_rotation_speed() -> void:
@@ -597,23 +689,82 @@ func _spawn_event() -> void:
 	var event_type := _pick_event_type()
 	if event_type == "monster":
 		var group_count := randi_range(1, 3)
+		var group_id := _next_preview_group_id()
 		for index in group_count:
 			var lane := randi_range(-1, 1)
-			_create_event(event_type, lane, -0.9 - float(index) * 0.08)
+			var angle_offset := -float(index) * EVENT_GROUP_ANGLE_STEP
+			_queue_preview_event(event_type, lane, false, group_id, index, angle_offset)
 		return
 
-	_create_event(event_type, randi_range(-1, 1), -0.9)
+	_queue_preview_event(event_type, randi_range(-1, 1))
 
 
-func _create_event(event_type: String, lane: int, angle: float, is_giant := false) -> void:
+func _next_preview_group_id() -> int:
+	preview_group_serial += 1
+	return preview_group_serial
+
+
+func _queue_preview_event(event_type: String, lane: int, is_giant := false, group_id := 0, group_member_index := 0, angle_offset := 0.0) -> void:
+	preview_event_serial += 1
+	var size_multiplier := 1.0
+	if event_type == "monster":
+		size_multiplier = GIANT_MONSTER_SCALE if is_giant else randf_range(NORMAL_MONSTER_MIN_SCALE, NORMAL_MONSTER_MAX_SCALE)
+	var max_preview_angle := maxf(event_preview_lead_angle, 0.001)
+	var preview_event := {
+		"id": preview_event_serial,
+		"type": event_type,
+		"lane": lane,
+		"preview_angle_remaining": max_preview_angle,
+		"max_preview_angle": max_preview_angle,
+		"spawn_angle": EVENT_SPAWN_ANGLE + angle_offset,
+		"is_giant": is_giant,
+		"group_id": group_id,
+		"group_member_index": group_member_index,
+		"angle_offset": angle_offset,
+		"handoff_state": "queued",
+		"handoff_alpha": 1.0,
+		"size_multiplier": size_multiplier,
+		"color": _event_color(event_type)
+	}
+	preview_event_queue.append(preview_event)
+
+
+func _update_preview_event_queue(delta: float) -> void:
+	if preview_event_queue.is_empty():
+		return
+	for preview_event in preview_event_queue.duplicate():
+		var remaining := float(preview_event.get("preview_angle_remaining", 0.0))
+		remaining = maxf(remaining - current_world_rotation_speed * delta, 0.0)
+		preview_event["preview_angle_remaining"] = remaining
+		if remaining <= 0.0:
+			_flush_preview_event_to_active(preview_event)
+
+
+func _flush_preview_event_to_active(preview_event: Dictionary) -> void:
+	if not preview_event_queue.has(preview_event):
+		return
+	preview_event["handoff_state"] = "active"
+	_create_event(
+		String(preview_event.get("type", "resource")),
+		int(preview_event.get("lane", 0)),
+		float(preview_event.get("spawn_angle", EVENT_SPAWN_ANGLE)),
+		bool(preview_event.get("is_giant", false)),
+		float(preview_event.get("size_multiplier", 1.0))
+	)
+	preview_event_queue.erase(preview_event)
+
+
+func _create_event(event_type: String, lane: int, angle: float, is_giant := false, size_multiplier := 0.0) -> void:
 	event_serial += 1
 	var marker := MeshInstance3D.new()
 	marker.name = "Event_%s_%d" % [event_type, event_serial]
 	marker.mesh = _event_mesh(event_type)
 	marker.material_override = _material(_event_color(event_type))
 	if event_type == "monster":
-		var size_multiplier := GIANT_MONSTER_SCALE if is_giant else randf_range(NORMAL_MONSTER_MIN_SCALE, NORMAL_MONSTER_MAX_SCALE)
-		marker.scale = Vector3.ONE * size_multiplier
+		var monster_size := size_multiplier
+		if monster_size <= 0.0:
+			monster_size = GIANT_MONSTER_SCALE if is_giant else randf_range(NORMAL_MONSTER_MIN_SCALE, NORMAL_MONSTER_MAX_SCALE)
+		marker.scale = Vector3.ONE * monster_size
 	add_child(marker)
 
 	var start_x := float(lane) * _lane_step()
@@ -682,8 +833,10 @@ func _resolve_event(event: Dictionary) -> void:
 
 func _spawn_giant_monsters_for_resonance() -> int:
 	var spawned := 0
+	var group_id := _next_preview_group_id()
 	while resonance_gained >= next_giant_resonance_threshold:
-		_create_event("monster", randi_range(-1, 1), -0.9 - float(spawned) * 0.08, true)
+		var angle_offset := -float(spawned) * EVENT_GROUP_ANGLE_STEP
+		_queue_preview_event("monster", randi_range(-1, 1), true, group_id, spawned, angle_offset)
 		next_giant_resonance_threshold += GIANT_RESONANCE_STEP
 		spawned += 1
 	return spawned

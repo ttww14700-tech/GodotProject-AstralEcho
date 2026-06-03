@@ -29,15 +29,20 @@ https://app.notion.com/p/GodotProject-AstralEcho-370dacf0068d80dd93b8f7286e4935d
 - Hub 據點球、鏡頭、物件佈局邏輯屬於局外系統，不要影響 `RunWorld.gd` 或 `RunWorld.tscn`。
 - Hub camera 使用固定構圖參數，不因 `hub_sphere_radius` 變大而自動拉遠；球體出框可以接受，優先維持角色畫面大小與操作可讀性。
 - Hub camera 需保留 `hub_camera_fov` 與 `hub_camera_screen_offset_y` 可調；不要再把 `HubCamera.fov` 寫死在程式裡。
-- 目前接近範本的 Hub 構圖候選值：
+- 目前 Hub 構圖以遊戲內 runtime 讀到的參數為準；若 Godot Inspector 再調整，Notion 與 AGENTS 需同步到 runtime 最終值：
+  - `hub_player_move_speed = 15.0`
+  - `hub_walk_radius = 70.0`
   - `hub_sphere_radius = 70.0`
-  - `hub_camera_pitch_deg = 31.0`
-  - `hub_camera_yaw_offset_deg = 6.0`
-  - `hub_camera_distance = 17.0`
-  - `hub_camera_height = 12.5`
-  - `hub_camera_look_at_height = 1.4`
-  - `hub_camera_screen_offset_y = 0.16`
-  - `hub_camera_fov = 44.0`
+  - `hub_camera_pitch_deg = 42.0`
+  - `hub_camera_yaw_offset_deg = 8.0`
+  - `hub_camera_distance = 17.5`
+  - `hub_camera_height = 15.0`
+  - `hub_camera_look_at_height = 1.3`
+  - `hub_camera_screen_offset_y = 0.10`
+  - `hub_camera_fov = 35.0`
+  - `project_scene_primitives_to_sphere = true`
+  - `hub_placement_plane_size = 12.0`
+  - `show_hub_placement_plane_debug = true`
 - Hub 球面地板格線需使用「平面方格投影到球面」的方式，不要使用會在角色腳下匯聚的經緯線格線。
 - Hub 球面方格由 `HubSphereController.gd` 的 `SURFACE_GRID_EXTENT_RATIO`、`SURFACE_GRID_STEP`、`SURFACE_GRID_SEGMENT_STEP` 控制。
 - Hub 物件佈局採用「平面編輯，運行時投影到球面」：

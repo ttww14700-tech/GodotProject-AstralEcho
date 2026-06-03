@@ -39,7 +39,7 @@ const SURFACE_GRID_EXTENT_RATIO := 0.82
 const SURFACE_GRID_STEP := 4.0
 const SURFACE_GRID_SEGMENT_STEP := 1.0
 const DEBUG_PANEL_WIDTH := 430.0
-const DEBUG_PANEL_HEIGHT := 490.0
+const DEBUG_PANEL_HEIGHT := 540.0
 const HUB_CAMERA_MODE := "Angled Mid Follow"
 const RECENT_MOVE_DEBUG_HOLD_TIME := 0.5
 const HUB_REFERENCE_BOX_SPECS := [
@@ -498,14 +498,18 @@ func _update_debug_label() -> void:
 	if not debug_label:
 		return
 
-	debug_label.text = "Hub Move Debug\nHub Camera: %s\ncamera_pitch_deg: %.2f\ncamera_yaw_offset_deg: %.2f\ncamera_distance: %.2f\ncamera_height: %.2f\nhub_camera_screen_offset_y: %.2f\nhub_camera_fov: %.2f\nplayer_move_distance: %.4f\nsphere_radius: %.2f\nvisual_rotation_multiplier: %.2f\ncalculated_rotation_radian: %.5f\nhub_walk_radius: %.2f\nlogical_hub_position: (%.2f, %.2f)\nplayer_visual_offset: %.3f\nplayer_distance_from_hub_center: %.4f\nwalk_radius_limited: %s\ncounter_axis: (%.2f, %.2f, %.2f)\nrecent_hold: %.2f\nlast_input_dir: (%.2f, %.2f)\nlast_move_distance: %.4f\nlast_rotation_radian: %.5f\nlast_counter_axis: (%.2f, %.2f, %.2f)\nlast_visual_rotation: %.5f" % [
+	var runtime_camera_fov := hub_camera.fov if hub_camera else hub_camera_fov
+	debug_label.text = "Hub Move Debug\nHub Camera: %s\ncontroller_path: %s\ncamera_node_path: %s\ncamera_pitch_deg: %.2f\ncamera_yaw_offset_deg: %.2f\ncamera_distance: %.2f\ncamera_height: %.2f\ncamera_look_at_height: %.2f\nhub_camera_screen_offset_y: %.2f\nhub_camera_fov: %.2f\nplayer_move_distance: %.4f\nsphere_radius: %.2f\nvisual_rotation_multiplier: %.2f\ncalculated_rotation_radian: %.5f\nhub_walk_radius: %.2f\nlogical_hub_position: (%.2f, %.2f)\nplayer_visual_offset: %.3f\nplayer_distance_from_hub_center: %.4f\nwalk_radius_limited: %s\ncounter_axis: (%.2f, %.2f, %.2f)\nrecent_hold: %.2f\nlast_input_dir: (%.2f, %.2f)\nlast_move_distance: %.4f\nlast_rotation_radian: %.5f\nlast_counter_axis: (%.2f, %.2f, %.2f)\nlast_visual_rotation: %.5f" % [
 		HUB_CAMERA_MODE,
+		str(get_path()),
+		str(hub_camera.get_path()) if hub_camera else "<none>",
 		hub_camera_pitch_deg,
 		hub_camera_yaw_offset_deg,
 		hub_camera_distance,
 		hub_camera_height,
+		hub_camera_look_at_height,
 		hub_camera_screen_offset_y,
-		hub_camera_fov,
+		runtime_camera_fov,
 		last_player_move_distance,
 		hub_sphere_radius,
 		visual_rotation_multiplier,
@@ -566,6 +570,7 @@ func _update_camera_transform(delta: float, snap := false) -> void:
 	if not hub_camera:
 		return
 
+	hub_camera.fov = hub_camera_fov
 	var player_anchor := _get_hub_camera_anchor()
 	var yaw := deg_to_rad(hub_camera_yaw_offset_deg)
 	var camera_direction := Vector3(sin(yaw), 0.0, cos(yaw)).normalized()

@@ -51,6 +51,8 @@ const WORLD_SIZE_OPTIONS := [
 @export var event_preview_layer_scene: PackedScene = RUN_EVENT_PREVIEW_LAYER_SCENE
 @export var event_preview_use_runworld_visual_overrides := false
 @export var event_preview_lead_angle := 1.4
+@export var event_preview_scale_with_world_radius := true
+@export var event_preview_reference_world_scale := 1.3
 @export var event_preview_far_screen_y := 0.22
 @export var event_preview_near_screen_y := 0.42
 @export var event_preview_center_x := 0.50
@@ -60,6 +62,17 @@ const WORLD_SIZE_OPTIONS := [
 @export var event_preview_hide_progress := 0.12
 @export var event_preview_fade_progress := 0.08
 @export var event_preview_debug_enabled := false
+@export var event_preview_debug_log_interval := 0.5
+@export var event_preview_use_grid_alignment := true
+@export var event_preview_grid_columns := 3
+@export var event_preview_grid_forward_bands := 4
+@export var event_preview_grid_lateral_span_lanes := 1.0
+@export var event_preview_grid_safe_screen_x_min := 0.08
+@export var event_preview_grid_safe_screen_x_max := 0.92
+@export var event_preview_projection_blend := 0.45
+@export var event_preview_projection_compression := 0.60
+@export var event_preview_min_screen_x := 0.14
+@export var event_preview_max_screen_x := 0.86
 
 var concentration := 100.0
 var resonance_gained := 0.0
@@ -167,6 +180,76 @@ func _lane_step() -> float:
 
 func _player_move_limit() -> float:
 	return PLAYER_MOVE_LIMIT * current_world_scale
+
+
+func _event_preview_reference_radius() -> float:
+	return maxf(WORLD_RADIUS * event_preview_reference_world_scale, 0.001)
+
+
+func _resolved_event_preview_lead_angle() -> float:
+	var lead_angle := maxf(event_preview_lead_angle, 0.001)
+	if not event_preview_scale_with_world_radius:
+		return lead_angle
+	return lead_angle * _event_preview_reference_radius() / maxf(current_world_radius, 0.001)
+
+
+func _event_preview_arc_length(angle: float) -> float:
+	return maxf(angle, 0.0) * current_world_radius
+
+
+func _event_preview_grid_column_from_lane(lane: int) -> int:
+	var columns := maxi(event_preview_grid_columns, 1)
+	if columns <= 1:
+		return 0
+	var span_lanes := maxf(event_preview_grid_lateral_span_lanes, 0.001)
+	var normalized := (clampf(float(lane), -span_lanes, span_lanes) + span_lanes) / (span_lanes * 2.0)
+	return clampi(roundi(normalized * float(columns - 1)), 0, columns - 1)
+
+
+func _event_preview_grid_x_from_column(column: int) -> float:
+	var columns := maxi(event_preview_grid_columns, 1)
+	if columns <= 1:
+		return 0.0
+	var safe_column := clampi(column, 0, columns - 1)
+	var span_lanes := maxf(event_preview_grid_lateral_span_lanes, 0.001)
+	var t := float(safe_column) / float(columns - 1)
+	return lerpf(-span_lanes * _lane_step(), span_lanes * _lane_step(), t)
+
+
+func _create_event_preview_grid_cell(lane: int, spawn_angle: float) -> Dictionary:
+	var column := _event_preview_grid_column_from_lane(lane)
+	var grid_x := _event_preview_grid_x_from_column(column)
+	return {
+		"column": column,
+		"columns": maxi(event_preview_grid_columns, 1),
+		"lane": lane,
+		"x": grid_x,
+		"spawn_angle": spawn_angle,
+		"spawn_forward_band": 0
+	}
+
+
+func _event_preview_grid_cell_label(grid_cell: Dictionary) -> String:
+	if grid_cell.is_empty():
+		return "{}"
+	return "col=%s/%s lane=%s x=%.3f spawn_angle=%.3f band=%s" % [
+		str(grid_cell.get("column", "?")),
+		str(grid_cell.get("columns", "?")),
+		str(grid_cell.get("lane", "?")),
+		float(grid_cell.get("x", 0.0)),
+		float(grid_cell.get("spawn_angle", 0.0)),
+		str(grid_cell.get("spawn_forward_band", "?"))
+	]
+
+
+func _event_preview_grid_world_position(grid_x: float, angle: float) -> Vector3:
+	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - grid_x * grid_x, 0.0))
+	return Vector3(grid_x, cos(angle) * local_radius + 0.18, sin(angle) * local_radius)
+
+
+func _event_preview_forward_band(raw_progress: float) -> int:
+	var bands := maxi(event_preview_grid_forward_bands, 1)
+	return clampi(floori((1.0 - clampf(raw_progress, 0.0, 1.0)) * float(bands)), 0, bands - 1)
 
 
 func _build_world() -> void:
@@ -521,13 +604,72 @@ func _sync_event_preview_layer(delta: float) -> void:
 	if not event_preview_layer:
 		return
 	_apply_event_preview_layer_settings()
+	_update_preview_event_grid_projections()
 	event_preview_layer.sync_preview_events(preview_event_queue, delta)
+
+
+func _update_preview_event_grid_projections() -> void:
+	if preview_event_queue.is_empty():
+		return
+	var safe_min := minf(event_preview_grid_safe_screen_x_min, event_preview_grid_safe_screen_x_max)
+	var safe_max := maxf(event_preview_grid_safe_screen_x_min, event_preview_grid_safe_screen_x_max)
+	for preview_event in preview_event_queue:
+		var lane := int(preview_event.get("lane", 0))
+		var spawn_angle := float(preview_event.get("spawn_angle", EVENT_SPAWN_ANGLE))
+		var grid_cell: Dictionary = preview_event.get("grid_cell", {})
+		if grid_cell.is_empty():
+			grid_cell = _create_event_preview_grid_cell(lane, spawn_angle)
+			preview_event["grid_cell"] = grid_cell
+
+		var max_preview_angle := maxf(float(preview_event.get("max_preview_angle", 0.001)), 0.001)
+		var preview_angle_remaining := clampf(float(preview_event.get("preview_angle_remaining", 0.0)), 0.0, max_preview_angle)
+		var raw_progress := clampf(preview_angle_remaining / max_preview_angle, 0.0, 1.0)
+		var preview_angle := float(grid_cell.get("spawn_angle", spawn_angle)) - preview_angle_remaining
+		var grid_x := float(grid_cell.get("x", float(lane) * _lane_step()))
+		var grid_world_position := _event_preview_grid_world_position(grid_x, preview_angle)
+		var projected_screen_x := _projected_screen_x(grid_world_position)
+		var projected_valid := event_preview_use_grid_alignment and run_camera != null and projected_screen_x > -10.0 and projected_screen_x < 10.0
+		var fallback_reason := ""
+		if not event_preview_use_grid_alignment:
+			fallback_reason = "grid_disabled"
+		elif not projected_valid:
+			fallback_reason = "projection_invalid"
+
+		preview_event["grid_world_position"] = grid_world_position
+		preview_event["grid_preview_angle"] = preview_angle
+		preview_event["grid_projected_screen_x"] = projected_screen_x
+		preview_event["grid_projected_valid"] = projected_valid
+		preview_event["grid_screen_x"] = projected_screen_x
+		preview_event["grid_safe_screen_x"] = clampf(projected_screen_x, safe_min, safe_max)
+		preview_event["grid_projection_fallback_reason"] = fallback_reason
+		preview_event["grid_forward_band"] = _event_preview_forward_band(raw_progress)
+
+
+func _event_preview_lane_screen_x(lane: int) -> float:
+	var resolved_center_x := event_preview_center_x
+	var resolved_lane_spacing := event_preview_lane_screen_spacing
+	if event_preview_layer:
+		resolved_center_x = float(event_preview_layer.get("center_x"))
+		resolved_lane_spacing = float(event_preview_layer.get("lane_screen_spacing"))
+	return clampf(resolved_center_x + float(lane) * resolved_lane_spacing, 0.0, 1.0)
+
+
+func _projected_screen_x(world_position: Vector3) -> float:
+	if not run_camera:
+		return -1.0
+	var viewport_width := maxf(float(get_viewport().get_visible_rect().size.x), 1.0)
+	return run_camera.unproject_position(world_position).x / viewport_width
 
 
 func _apply_event_preview_layer_settings() -> void:
 	if not event_preview_layer:
 		return
 	event_preview_layer.enabled = event_preview_enabled
+	event_preview_layer.use_grid_alignment = event_preview_use_grid_alignment
+	event_preview_layer.projection_blend = event_preview_projection_blend
+	event_preview_layer.projection_compression = event_preview_projection_compression
+	event_preview_layer.min_screen_x = event_preview_min_screen_x
+	event_preview_layer.max_screen_x = event_preview_max_screen_x
 	if not event_preview_use_runworld_visual_overrides:
 		return
 	event_preview_layer.far_screen_y = event_preview_far_screen_y
@@ -546,26 +688,84 @@ func _print_event_preview_debug(delta: float) -> void:
 	event_preview_debug_timer -= delta
 	if event_preview_debug_timer > 0.0:
 		return
-	event_preview_debug_timer = 0.5
+	event_preview_debug_timer = maxf(event_preview_debug_log_interval, 0.05)
+
+	var resolved_lead_angle := _resolved_event_preview_lead_angle()
+	var lead_arc_length := _event_preview_arc_length(resolved_lead_angle)
+	var hide_arc_length := _event_preview_arc_length(resolved_lead_angle * event_preview_hide_progress)
+	var fade_arc_length := _event_preview_arc_length(resolved_lead_angle * event_preview_fade_progress)
+	var fade_start_arc_length := _event_preview_arc_length(resolved_lead_angle * (event_preview_hide_progress + event_preview_fade_progress))
+	var lane_anchor_rows := []
+	for lane in [-1, 0, 1]:
+		lane_anchor_rows.append("lane=%d screen_x=%.3f" % [
+			lane,
+			_event_preview_lane_screen_x(lane)
+		])
 
 	var preview_rows := []
 	for preview_event in preview_event_queue:
-		preview_rows.append("%s lane=%s remaining=%.3f visible=%s" % [
+		var max_preview_angle := maxf(float(preview_event.get("max_preview_angle", 0.001)), 0.001)
+		var preview_angle_remaining := float(preview_event.get("preview_angle_remaining", 0.0))
+		var raw_progress := clampf(preview_angle_remaining / max_preview_angle, 0.0, 1.0)
+		var grid_cell: Dictionary = preview_event.get("grid_cell", {})
+		var grid_projected_screen_x := float(preview_event.get("grid_projected_screen_x", -1.0))
+		var grid_safe_screen_x := float(preview_event.get("grid_safe_screen_x", -1.0))
+		var grid_projected_valid := bool(preview_event.get("grid_projected_valid", false))
+		var ui_marker_screen_x := float(preview_event.get("ui_marker_screen_x", _event_preview_lane_screen_x(int(preview_event.get("lane", 0)))))
+		var fixed_x := float(preview_event.get("ui_marker_fixed_x", _event_preview_lane_screen_x(int(preview_event.get("lane", 0)))))
+		var projected_x := float(preview_event.get("ui_marker_projected_x", grid_projected_screen_x))
+		var compressed_projected_x := float(preview_event.get("ui_marker_compressed_projected_x", projected_x))
+		var unclamped_screen_x := float(preview_event.get("ui_marker_unclamped_screen_x", ui_marker_screen_x))
+		var clamp_delta := float(preview_event.get("ui_marker_clamp_delta", 0.0))
+		var projection_blend := float(preview_event.get("ui_marker_projection_blend", event_preview_projection_blend))
+		var projection_compression := float(preview_event.get("ui_marker_projection_compression", event_preview_projection_compression))
+		var ui_marker_source := String(preview_event.get("ui_marker_screen_x_source", "pending"))
+		var fallback_reason := String(preview_event.get("grid_projection_fallback_reason", ""))
+		preview_rows.append("%s lane=%s grid={%s} band=%s remaining=%.3f raw=%.3f arc=%.3f fixed_x=%.3f projected_x=%.3f compressed_x=%.3f unclamped_x=%.3f final_x=%.3f clamp_delta=%.3f blend=%.2f compression=%.2f grid_safe_x=%.3f grid_valid=%s ui_source=%s fallback=%s visible=%s" % [
 			String(preview_event.get("type", "?")),
 			str(preview_event.get("lane", "?")),
-			float(preview_event.get("preview_angle_remaining", 0.0)),
+			_event_preview_grid_cell_label(grid_cell),
+			str(preview_event.get("grid_forward_band", "?")),
+			preview_angle_remaining,
+			raw_progress,
+			_event_preview_arc_length(preview_angle_remaining),
+			fixed_x,
+			projected_x,
+			compressed_projected_x,
+			unclamped_screen_x,
+			ui_marker_screen_x,
+			clamp_delta,
+			projection_blend,
+			projection_compression,
+			grid_safe_screen_x,
+			"YES" if grid_projected_valid else "NO",
+			ui_marker_source,
+			fallback_reason,
 			"YES" if event_preview_enabled else "NO"
 		])
 
 	var active_rows := []
 	for event in active_events:
-		active_rows.append("%s lane=%s angle=%.3f" % [
+		var grid_cell: Dictionary = event.get("grid_cell", {})
+		active_rows.append("%s lane=%s grid={%s} x=%.3f angle=%.3f" % [
 			String(event.get("type", "?")),
 			str(event.get("lane", "?")),
+			_event_preview_grid_cell_label(grid_cell),
+			float(event.get("x", 0.0)),
 			float(event.get("angle", 0.0))
 		])
 
-	print("EventPreviewDebug active_events=%d preview_candidates=%d queue=[%s] active=[%s]" % [
+	print("EventPreviewDebug world=%s scale=%.2f radius=%.3f reference_radius=%.3f resolved_lead_angle=%.3f lead_arc=%.3f hide_arc=%.3f fade_arc=%.3f fade_start_arc=%.3f lane_anchors=[%s] active_events=%d preview_candidates=%d queue=[%s] active=[%s]" % [
+		current_world_size_name,
+		current_world_scale,
+		current_world_radius,
+		_event_preview_reference_radius(),
+		resolved_lead_angle,
+		lead_arc_length,
+		hide_arc_length,
+		fade_arc_length,
+		fade_start_arc_length,
+		"; ".join(lane_anchor_rows),
 		active_events.size(),
 		preview_event_queue.size(),
 		"; ".join(preview_rows),
@@ -709,14 +909,20 @@ func _queue_preview_event(event_type: String, lane: int, is_giant := false, grou
 	var size_multiplier := 1.0
 	if event_type == "monster":
 		size_multiplier = GIANT_MONSTER_SCALE if is_giant else randf_range(NORMAL_MONSTER_MIN_SCALE, NORMAL_MONSTER_MAX_SCALE)
-	var max_preview_angle := maxf(event_preview_lead_angle, 0.001)
+	var max_preview_angle := _resolved_event_preview_lead_angle()
+	var spawn_angle := EVENT_SPAWN_ANGLE + angle_offset
+	var grid_cell := _create_event_preview_grid_cell(lane, spawn_angle)
 	var preview_event := {
 		"id": preview_event_serial,
 		"type": event_type,
 		"lane": lane,
 		"preview_angle_remaining": max_preview_angle,
 		"max_preview_angle": max_preview_angle,
-		"spawn_angle": EVENT_SPAWN_ANGLE + angle_offset,
+		"preview_reference_radius": _event_preview_reference_radius(),
+		"preview_world_radius": current_world_radius,
+		"preview_lead_arc_length": _event_preview_arc_length(max_preview_angle),
+		"spawn_angle": spawn_angle,
+		"grid_cell": grid_cell,
 		"is_giant": is_giant,
 		"group_id": group_id,
 		"group_member_index": group_member_index,
@@ -744,17 +950,19 @@ func _flush_preview_event_to_active(preview_event: Dictionary) -> void:
 	if not preview_event_queue.has(preview_event):
 		return
 	preview_event["handoff_state"] = "active"
+	var grid_cell: Dictionary = preview_event.get("grid_cell", {})
 	_create_event(
 		String(preview_event.get("type", "resource")),
 		int(preview_event.get("lane", 0)),
 		float(preview_event.get("spawn_angle", EVENT_SPAWN_ANGLE)),
 		bool(preview_event.get("is_giant", false)),
-		float(preview_event.get("size_multiplier", 1.0))
+		float(preview_event.get("size_multiplier", 1.0)),
+		grid_cell
 	)
 	preview_event_queue.erase(preview_event)
 
 
-func _create_event(event_type: String, lane: int, angle: float, is_giant := false, size_multiplier := 0.0) -> void:
+func _create_event(event_type: String, lane: int, angle: float, is_giant := false, size_multiplier := 0.0, grid_cell: Dictionary = {}) -> void:
 	event_serial += 1
 	var marker := MeshInstance3D.new()
 	marker.name = "Event_%s_%d" % [event_type, event_serial]
@@ -767,17 +975,23 @@ func _create_event(event_type: String, lane: int, angle: float, is_giant := fals
 		marker.scale = Vector3.ONE * monster_size
 	add_child(marker)
 
-	var start_x := float(lane) * _lane_step()
+	var resolved_grid_cell := grid_cell.duplicate(true)
+	if resolved_grid_cell.is_empty():
+		resolved_grid_cell = _create_event_preview_grid_cell(lane, angle)
+	var start_x := float(resolved_grid_cell.get("x", float(lane) * _lane_step()))
+	var start_angle := float(resolved_grid_cell.get("spawn_angle", angle))
 	var event := {
 		"type": event_type,
 		"lane": lane,
 		"x": start_x,
-		"angle": angle,
+		"angle": start_angle,
 		"node": marker,
-		"is_giant": is_giant
+		"is_giant": is_giant,
+		"grid_cell": resolved_grid_cell
 	}
 	active_events.append(event)
 	_position_event(event)
+	_print_event_preview_active_spawn_debug(event)
 
 
 func _position_event(event: Dictionary) -> void:
@@ -787,6 +1001,26 @@ func _position_event(event: Dictionary) -> void:
 	var marker: MeshInstance3D = event["node"]
 	marker.position = Vector3(x, cos(angle) * local_radius + 0.18, sin(angle) * local_radius)
 	marker.look_at(Vector3(x, 0, 0), Vector3.UP)
+
+
+func _print_event_preview_active_spawn_debug(event: Dictionary) -> void:
+	if not event_preview_debug_enabled:
+		return
+	var marker: MeshInstance3D = event["node"]
+	var lane := int(event.get("lane", 0))
+	var start_x := float(event.get("x", float(lane) * _lane_step()))
+	var projected_screen_x := _projected_screen_x(marker.global_position)
+	var ui_marker_screen_x := _event_preview_lane_screen_x(lane)
+	var grid_cell: Dictionary = event.get("grid_cell", {})
+	print("EventPreviewActiveSpawn type=%s lane=%d grid={%s} start_x=%.3f projected_screen_x=%.3f ui_marker_screen_x=%.3f diff=%.3f" % [
+		String(event.get("type", "?")),
+		lane,
+		_event_preview_grid_cell_label(grid_cell),
+		start_x,
+		projected_screen_x,
+		ui_marker_screen_x,
+		projected_screen_x - ui_marker_screen_x
+	])
 
 
 func _update_monster_chase(event: Dictionary, delta: float) -> void:

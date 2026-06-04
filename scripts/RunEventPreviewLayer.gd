@@ -12,6 +12,11 @@ const RUN_EVENT_PREVIEW_MARKER_SCRIPT := preload("res://scripts/RunEventPreviewM
 @export var position_lerp_speed := 3.0
 @export var hide_progress := 0.12
 @export var fade_progress := 0.08
+@export var use_grid_alignment := true
+@export var projection_blend := 0.45
+@export var projection_compression := 0.60
+@export var min_screen_x := 0.14
+@export var max_screen_x := 0.86
 
 @export_group("Marker Components")
 @export var monster_marker_scene: PackedScene
@@ -137,10 +142,21 @@ func _update_marker(marker: Control, event: Dictionary, delta: float) -> void:
 	var visible_progress := (raw_progress - hide_progress) / maxf(1.0 - hide_progress, 0.001)
 	visible_progress = clampf(visible_progress, 0.0, 1.0)
 
-	var lane := int(event.get("lane", 0))
-	var screen_x := clampf(center_x + float(lane) * lane_screen_spacing, 0.0, 1.0)
+	var screen_x_data := _resolve_marker_screen_x(event)
+	var screen_x := float(screen_x_data.get("screen_x", center_x))
 	var screen_y := clampf(lerpf(near_screen_y, far_screen_y, visible_progress), 0.0, 1.0)
 	var target_position: Vector2 = Vector2(screen_x * viewport_size.x, screen_y * viewport_size.y) - marker.size * 0.5
+	event["ui_marker_grid_cell"] = event.get("grid_cell", {})
+	event["ui_marker_screen_x"] = screen_x
+	event["ui_marker_screen_x_source"] = String(screen_x_data.get("source", "fixed_lane"))
+	event["ui_marker_fixed_x"] = float(screen_x_data.get("fixed_x", screen_x))
+	event["ui_marker_projected_x"] = float(screen_x_data.get("projected_x", screen_x))
+	event["ui_marker_compressed_projected_x"] = float(screen_x_data.get("compressed_projected_x", screen_x))
+	event["ui_marker_unclamped_screen_x"] = float(screen_x_data.get("unclamped_x", screen_x))
+	event["ui_marker_clamp_delta"] = float(screen_x_data.get("clamp_delta", 0.0))
+	event["ui_marker_projection_blend"] = clampf(projection_blend, 0.0, 1.0)
+	event["ui_marker_projection_compression"] = projection_compression
+	event["ui_marker_screen_y"] = screen_y
 
 	if not marker.has_meta("preview_initialized"):
 		marker.position = target_position
@@ -157,6 +173,38 @@ func _update_marker(marker: Control, event: Dictionary, delta: float) -> void:
 		fade_alpha = clampf((raw_progress - hide_progress) / fade_progress, 0.0, 1.0)
 	marker.modulate.a = fade_alpha
 	marker.visible = true
+
+
+func _resolve_marker_screen_x(event: Dictionary) -> Dictionary:
+	var lane := int(event.get("lane", 0))
+	var fixed_x := center_x + float(lane) * lane_screen_spacing
+	var safe_min := minf(min_screen_x, max_screen_x)
+	var safe_max := maxf(min_screen_x, max_screen_x)
+	if use_grid_alignment and bool(event.get("grid_projected_valid", false)):
+		var projected_x := float(event.get("grid_screen_x", fixed_x))
+		var compressed_projected_x := center_x + (projected_x - center_x) * projection_compression
+		var blend := clampf(projection_blend, 0.0, 1.0)
+		var unclamped_x := lerpf(fixed_x, compressed_projected_x, blend)
+		var final_x := clampf(unclamped_x, safe_min, safe_max)
+		return {
+			"screen_x": final_x,
+			"source": "grid_compressed",
+			"fixed_x": fixed_x,
+			"projected_x": projected_x,
+			"compressed_projected_x": compressed_projected_x,
+			"unclamped_x": unclamped_x,
+			"clamp_delta": final_x - unclamped_x
+		}
+	var final_fixed_x := clampf(fixed_x, safe_min, safe_max)
+	return {
+		"screen_x": final_fixed_x,
+		"source": "fixed_lane",
+		"fixed_x": fixed_x,
+		"projected_x": fixed_x,
+		"compressed_projected_x": fixed_x,
+		"unclamped_x": fixed_x,
+		"clamp_delta": final_fixed_x - fixed_x
+	}
 
 
 func _remove_hidden_previews(visible_ids: Dictionary) -> void:

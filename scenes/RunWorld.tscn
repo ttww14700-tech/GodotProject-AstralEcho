@@ -5,7 +5,7 @@
 [node name="RunWorld" type="Node3D" unique_id=687037308]
 transform = Transform3D(0.9996416, 0.026770152, 0, -0.026770152, 0.9996416, 0, 0, 0, 1, 0, 0, 0)
 script = ExtResource("1")
-world_rotation_speed = 0.35
+base_surface_speed = 5.0
 camera_distance_ratio = 2.25
 camera_height_ratio = 1.05
 camera_pitch_deg = 32.0
@@ -13,11 +13,6 @@ camera_target_toward_center_ratio = 0.45
 planet_top_screen_y = 0.5
 player_screen_y = 0.73
 player_visual_forward_angle_max = 0.1
-player_visual_backward_angle_max = 0.06
 player_visual_forward_shift_speed = 0.5
-lane_dash_double_tap_window = 0.28
-lane_dash_distance_ratio = 0.5
-lane_dash_duration = 0.18
-lane_dash_cooldown_duration = 0.45
 planet_visible_height_ratio = 0.5
 camera_fov = 25.0

@@ -26,8 +26,8 @@ const WORLD_SIZE_OPTIONS := [
 	{"name": "大型球", "scale": 3.0}
 ]
 
-@export var world_rotation_speed := 0.5
-@export var giant_monster_world_rotation_speed := 0.1
+@export var base_surface_speed := 3.64
+@export var giant_monster_surface_speed := 1.04
 @export var slow_down_multiplier := 0.4
 @export var equipment_speed_multiplier := 1.0
 @export var camera_preset := "SmallPlanetSurfaceArcView"
@@ -93,7 +93,8 @@ var event_serial := 0
 var preview_event_serial := 0
 var preview_group_serial := 0
 var control_scheme := "mouse"
-var current_world_rotation_speed := 0.5
+var current_surface_speed := 0.0
+var current_world_rotation_speed := 0.0
 var current_world_size_name := "小型球"
 var current_world_scale := 1.0
 var current_world_radius := WORLD_RADIUS
@@ -137,9 +138,12 @@ func _ready() -> void:
 	concentration = clampf(GameState.blue_concentration, 0.0, 100.0)
 	pending_resume_data = GameState.consume_resume_run_data()
 	_select_world_size()
+	_update_world_rotation_speed()
 	_build_world()
 	_build_hud()
 	_restore_resume_state()
+	_update_world_rotation_speed()
+	_update_hud()
 	if elapsed > 0.0:
 		_log("繼續探索：已恢復撤退當下的紀錄。球體 %s x%.1f。" % [current_world_size_name, current_world_scale])
 	else:
@@ -774,16 +778,17 @@ func _print_event_preview_debug(delta: float) -> void:
 
 
 func _update_world_rotation_speed() -> void:
-	var environment_speed := world_rotation_speed
+	var surface_speed := base_surface_speed
 	for event in active_events:
 		if event["type"] != "monster" or not event.get("is_giant", false):
 			continue
-		environment_speed = giant_monster_world_rotation_speed
+		surface_speed = giant_monster_surface_speed
 		break
-	current_world_rotation_speed = environment_speed * _get_player_speed_multiplier()
+	current_surface_speed = surface_speed * _get_surface_speed_multiplier()
+	current_world_rotation_speed = current_surface_speed / maxf(current_world_radius, 0.001)
 
 
-func _get_player_speed_multiplier() -> float:
+func _get_surface_speed_multiplier() -> float:
 	var multiplier := equipment_speed_multiplier
 	if Input.is_action_pressed("slow_down"):
 		multiplier *= slow_down_multiplier
@@ -866,7 +871,8 @@ func _update_hud() -> void:
 	var module_name: String = GameState.get_selected_module_data()["name"]
 	var control_text := "鍵盤" if control_scheme == "keyboard" else "滑鼠"
 	var slow_text := "慢速中" if Input.is_action_pressed("slow_down") else "一般"
-	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s / 球體 %s x%.1f\n方向 %d / 控制 %s / 速度 %.0f%% %s / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
+	var surface_speed_multiplier := _get_surface_speed_multiplier()
+	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n球體 %s x%.1f / 半徑 %.2f / surface倍率 %.0f%% / surface %.2f / angular %.4f\n方向 %d / 控制 %s / 速度 %s / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
 		_format_time(elapsed),
 		concentration,
 		resonance_gained,
@@ -875,9 +881,12 @@ func _update_hud() -> void:
 		module_name,
 		current_world_size_name,
 		current_world_scale,
+		current_world_radius,
+		surface_speed_multiplier * 100.0,
+		current_surface_speed,
+		current_world_rotation_speed,
 		player_lane,
 		control_text,
-		_get_player_speed_multiplier() * 100.0,
 		slow_text,
 		dodge_cooldown,
 		skill_cooldown,

@@ -11,7 +11,6 @@ const EVENT_EXPIRE_ANGLE := 0.75
 const LANE_STEP := 4.4
 const PLAYER_MOVE_LIMIT := 5.2
 const LATERAL_SPEED := 3.2
-const MOUSE_DEADZONE := 0.5
 const MONSTER_CHASE_SPEED := 0.8
 const GRID_RADIUS_OFFSET := 0.018
 const GIANT_RESONANCE_STEP := 10.0
@@ -47,6 +46,10 @@ const WORLD_SIZE_OPTIONS := [
 @export var lane_dash_cooldown_duration := 0.45
 @export var planet_visible_height_ratio := 0.58
 @export var camera_fov := 48.0
+@export var surface_grid_cube_face_subdivisions := 12
+@export var surface_grid_segments_per_cell := 8
+@export var surface_grid_lane_guide_extent_lanes := 1
+@export var surface_grid_lane_guide_angle_steps := 144
 @export var event_preview_enabled := true
 @export var event_preview_layer_scene: PackedScene = RUN_EVENT_PREVIEW_LAYER_SCENE
 @export var event_preview_use_runworld_visual_overrides := false
@@ -92,7 +95,7 @@ var spawn_timer := 2.0
 var event_serial := 0
 var preview_event_serial := 0
 var preview_group_serial := 0
-var control_scheme := "mouse"
+var control_scheme := "keyboard"
 var current_surface_speed := 0.0
 var current_world_rotation_speed := 0.0
 var current_world_size_name := "小型球"
@@ -184,6 +187,22 @@ func _lane_step() -> float:
 
 func _player_move_limit() -> float:
 	return PLAYER_MOVE_LIMIT * current_world_scale
+
+
+func _lane_center_x(lane: int) -> float:
+	return float(lane) * _lane_step()
+
+
+func _surface_grid_center_x() -> float:
+	return 0.0
+
+
+func _grid_center_offset() -> float:
+	return lane_target - _surface_grid_center_x()
+
+
+func _lane_center_offset() -> float:
+	return lane_target - _lane_center_x(player_lane)
 
 
 func _event_preview_reference_radius() -> float:
@@ -303,42 +322,148 @@ func _add_surface_grid() -> void:
 	grid.material_override = _grid_material()
 	world_mesh.add_child(grid)
 
+	var lane_guides := MeshInstance3D.new()
+	lane_guides.name = "SurfaceLaneGuides"
+	lane_guides.mesh = _create_surface_lane_guides_mesh(false)
+	lane_guides.material_override = _lane_guide_material(false)
+	world_mesh.add_child(lane_guides)
+
+	var center_guide := MeshInstance3D.new()
+	center_guide.name = "SurfaceCenterLaneGuide"
+	center_guide.mesh = _create_surface_center_lane_guide_mesh()
+	center_guide.material_override = _lane_guide_material(true)
+	world_mesh.add_child(center_guide)
+
 
 func _create_surface_grid_mesh() -> Mesh:
 	var mesh := ImmediateMesh.new()
 	var radius := current_world_radius + GRID_RADIUS_OFFSET
-	var latitude_steps := 8
-	var longitude_steps := 24
-	var segment_steps := 96
+	var subdivisions := maxi(surface_grid_cube_face_subdivisions, 2)
+	var segments_per_line := subdivisions * maxi(surface_grid_segments_per_cell, 1)
+	var seam_line_keys := {}
 
 	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
 
-	for lat_index in range(1, latitude_steps):
-		var theta := -PI * 0.5 + PI * float(lat_index) / float(latitude_steps)
-		var y := sin(theta) * radius
-		var ring_radius := cos(theta) * radius
-		for step in range(segment_steps):
-			var a := TAU * float(step) / float(segment_steps)
-			var b := TAU * float(step + 1) / float(segment_steps)
-			mesh.surface_add_vertex(Vector3(cos(a) * ring_radius, y, sin(a) * ring_radius))
-			mesh.surface_add_vertex(Vector3(cos(b) * ring_radius, y, sin(b) * ring_radius))
-
-	for lon_index in range(longitude_steps):
-		var phi := TAU * float(lon_index) / float(longitude_steps)
-		for step in range(segment_steps):
-			var theta_a := -PI * 0.5 + PI * float(step) / float(segment_steps)
-			var theta_b := -PI * 0.5 + PI * float(step + 1) / float(segment_steps)
-			mesh.surface_add_vertex(Vector3(cos(theta_a) * cos(phi) * radius, sin(theta_a) * radius, cos(theta_a) * sin(phi) * radius))
-			mesh.surface_add_vertex(Vector3(cos(theta_b) * cos(phi) * radius, sin(theta_b) * radius, cos(theta_b) * sin(phi) * radius))
+	for face in range(6):
+		for grid_index in range(subdivisions + 1):
+			var offset := -1.0 + 2.0 * float(grid_index) / float(subdivisions)
+			_add_cube_sphere_grid_line_if_unique(mesh, seam_line_keys, face, Vector2(offset, -1.0), Vector2(offset, 1.0), radius, segments_per_line)
+			_add_cube_sphere_grid_line_if_unique(mesh, seam_line_keys, face, Vector2(-1.0, offset), Vector2(1.0, offset), radius, segments_per_line)
 
 	mesh.surface_end()
 	return mesh
 
 
+func _add_cube_sphere_grid_line_if_unique(mesh: ImmediateMesh, seam_line_keys: Dictionary, face: int, start: Vector2, end: Vector2, radius: float, segment_steps: int) -> void:
+	if _cube_sphere_line_is_face_edge(start, end):
+		var seam_key := _cube_sphere_line_key(face, start, end)
+		if seam_line_keys.has(seam_key):
+			return
+		seam_line_keys[seam_key] = true
+	_add_cube_sphere_grid_line(mesh, face, start, end, radius, segment_steps)
+
+
+func _cube_sphere_line_is_face_edge(start: Vector2, end: Vector2) -> bool:
+	return (
+		is_equal_approx(start.x, end.x) and is_equal_approx(absf(start.x), 1.0)
+	) or (
+		is_equal_approx(start.y, end.y) and is_equal_approx(absf(start.y), 1.0)
+	)
+
+
+func _cube_sphere_line_key(face: int, start: Vector2, end: Vector2) -> String:
+	var endpoints := [
+		_quantized_grid_point(_cube_sphere_point(face, start, 1.0)),
+		_quantized_grid_point(_cube_sphere_point(face, end, 1.0))
+	]
+	endpoints.sort()
+	return "%s|%s" % [endpoints[0], endpoints[1]]
+
+
+func _quantized_grid_point(point: Vector3) -> String:
+	return "%.5f,%.5f,%.5f" % [point.x, point.y, point.z]
+
+
+func _add_cube_sphere_grid_line(mesh: ImmediateMesh, face: int, start: Vector2, end: Vector2, radius: float, segment_steps: int) -> void:
+	var steps := maxi(segment_steps, 1)
+	for step in range(steps):
+		var t_a := float(step) / float(steps)
+		var t_b := float(step + 1) / float(steps)
+		mesh.surface_add_vertex(_cube_sphere_point(face, start.lerp(end, t_a), radius))
+		mesh.surface_add_vertex(_cube_sphere_point(face, start.lerp(end, t_b), radius))
+
+
+func _cube_sphere_point(face: int, uv: Vector2, radius: float) -> Vector3:
+	var cube_point := Vector3.ZERO
+	match face:
+		0:
+			cube_point = Vector3(1.0, uv.y, -uv.x)
+		1:
+			cube_point = Vector3(-1.0, uv.y, uv.x)
+		2:
+			cube_point = Vector3(uv.x, 1.0, uv.y)
+		3:
+			cube_point = Vector3(uv.x, -1.0, -uv.y)
+		4:
+			cube_point = Vector3(uv.x, uv.y, 1.0)
+		_:
+			cube_point = Vector3(-uv.x, uv.y, -1.0)
+	return cube_point.normalized() * radius
+
+
+func _create_surface_lane_guides_mesh(include_center: bool) -> Mesh:
+	var mesh := ImmediateMesh.new()
+	var radius := current_world_radius + GRID_RADIUS_OFFSET * 1.8
+	var lane_extent := maxi(surface_grid_lane_guide_extent_lanes, 0)
+	var angle_steps := maxi(surface_grid_lane_guide_angle_steps, 8)
+
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	for lane in range(-lane_extent, lane_extent + 1):
+		if lane == 0 and not include_center:
+			continue
+		_add_lane_guide_line(mesh, _lane_center_x(lane), radius, angle_steps)
+	mesh.surface_end()
+	return mesh
+
+
+func _create_surface_center_lane_guide_mesh() -> Mesh:
+	var mesh := ImmediateMesh.new()
+	var radius := current_world_radius + GRID_RADIUS_OFFSET * 2.4
+	var angle_steps := maxi(surface_grid_lane_guide_angle_steps, 8)
+
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	_add_lane_guide_line(mesh, _surface_grid_center_x(), radius, angle_steps)
+	mesh.surface_end()
+	return mesh
+
+
+func _add_lane_guide_line(mesh: ImmediateMesh, x: float, radius: float, angle_steps: int) -> void:
+	var clamped_x := clampf(x, -radius + 0.001, radius - 0.001)
+	var lane_radius := sqrt(maxf(radius * radius - clamped_x * clamped_x, 0.0))
+	for step in range(angle_steps):
+		var a := TAU * float(step) / float(angle_steps)
+		var b := TAU * float(step + 1) / float(angle_steps)
+		mesh.surface_add_vertex(_lane_guide_point(clamped_x, lane_radius, a, radius))
+		mesh.surface_add_vertex(_lane_guide_point(clamped_x, lane_radius, b, radius))
+
+
+func _lane_guide_point(x: float, lane_radius: float, angle: float, radius: float) -> Vector3:
+	return Vector3(x, cos(angle) * lane_radius, sin(angle) * lane_radius).normalized() * radius
+
+
 func _grid_material() -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_color = Color(0.78, 0.82, 0.84, 0.144)
+	material.albedo_color = Color(0.78, 0.82, 0.84, 0.12)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.no_depth_test = false
+	return material
+
+
+func _lane_guide_material(is_center: bool) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(0.86, 0.9, 0.92, 0.36 if is_center else 0.22)
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.no_depth_test = false
 	return material
@@ -433,16 +558,11 @@ func _build_hud() -> void:
 	layer.add_child(controls_panel)
 
 	var controls := Label.new()
-	controls.text = "基礎操作\nA/D 或 ←/→：左右移動，雙擊 A/D 可短距離閃避\n移動滑鼠：滑鼠接管左右方向\nW：長按前移角色視覺\nS：長按減速並後退角色視覺\nSpace：迴避閃過事件\nF：使用技能\nB：提前撤退"
+	controls.text = "基礎操作\nA/D 或 ←/→：左右移動，雙擊 A/D 可短距離閃避\nW：長按前移角色視覺\nS：長按減速並後退角色視覺\nSpace：迴避閃過事件\nF：使用技能\nB：提前撤退"
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	controls_panel.add_child(controls)
 
 	_apply_font_size(layer)
-
-
-func _input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and event.relative.length() > MOUSE_DEADZONE:
-		control_scheme = "mouse"
 
 
 func _handle_input(delta: float) -> void:
@@ -456,14 +576,6 @@ func _handle_input(delta: float) -> void:
 		control_scheme = "keyboard"
 		var move_limit := _player_move_limit()
 		lane_target = clampf(lane_target + lateral_axis * LATERAL_SPEED * current_world_scale * delta, -move_limit, move_limit)
-	elif control_scheme == "mouse":
-		var viewport_width := float(get_viewport().get_visible_rect().size.x)
-		if viewport_width > 0.0:
-			var mouse_x := get_viewport().get_mouse_position().x
-			var mouse_ratio := clampf(mouse_x / viewport_width, 0.0, 1.0)
-			var move_limit := _player_move_limit()
-			var mouse_target := lerpf(-move_limit, move_limit, mouse_ratio)
-			lane_target = move_toward(lane_target, mouse_target, LATERAL_SPEED * current_world_scale * delta)
 	player_lane = clampi(roundi(lane_target / _lane_step()), -1, 1)
 	if Input.is_action_just_pressed("dodge") and dodge_cooldown <= 0.0:
 		dodge_timer = 0.55
@@ -872,7 +984,7 @@ func _update_hud() -> void:
 	var control_text := "鍵盤" if control_scheme == "keyboard" else "滑鼠"
 	var slow_text := "慢速中" if Input.is_action_pressed("slow_down") else "一般"
 	var surface_speed_multiplier := _get_surface_speed_multiplier()
-	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n球體 %s x%.1f / 半徑 %.2f / surface倍率 %.0f%% / surface %.2f / angular %.4f\n方向 %d / 控制 %s / 速度 %s / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
+	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n球體 %s x%.1f / 半徑 %.2f / surface倍率 %.0f%% / surface %.2f / angular %.4f\nlane_target %.3f / player_lane %d / grid_center_offset %.3f / lane_offset %.3f\n控制 %s / 速度 %s / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
 		_format_time(elapsed),
 		concentration,
 		resonance_gained,
@@ -885,7 +997,10 @@ func _update_hud() -> void:
 		surface_speed_multiplier * 100.0,
 		current_surface_speed,
 		current_world_rotation_speed,
+		lane_target,
 		player_lane,
+		_grid_center_offset(),
+		_lane_center_offset(),
 		control_text,
 		slow_text,
 		dodge_cooldown,
@@ -1252,8 +1367,9 @@ func _restore_resume_state() -> void:
 	mine_points = data.get("mine_points", mine_points)
 	elapsed = data.get("elapsed", elapsed)
 	entered_danger = data.get("entered_danger", entered_danger)
-	player_lane = data.get("player_lane", player_lane)
-	lane_target = data.get("lane_target", player_lane * _lane_step())
+	player_lane = clampi(int(data.get("player_lane", player_lane)), -1, 1)
+	lane_target = clampf(float(data.get("lane_target", lane_target)), -_player_move_limit(), _player_move_limit())
+	player_lane = clampi(roundi(lane_target / _lane_step()), -1, 1)
 	current_world_size_name = data.get("world_size_name", current_world_size_name)
 	current_world_scale = float(data.get("world_scale", current_world_scale))
 	current_world_radius = float(data.get("world_radius", current_world_radius))

@@ -22,6 +22,23 @@ https://app.notion.com/p/GodotProject-AstralEcho-370dacf0068d80dd93b8f7286e4935d
 - 若 checklist 項目下方有規則子頁，需同步更新子頁內容，再回到主頁更新 checklist 狀態。
 - 只勾選已經由使用者確認完成，或已完成實作與驗證的項目。
 
+## 局內 RunWorld 球面格線與操作規則
+
+- RunWorld 局內球面格線使用 cube sphere grid，不要再使用單純 latitude / longitude 經緯線生成，避免極點附近出現放射線集中。
+- cube sphere grid 每條格線需在 cube face 上逐段插值，並將每個 segment 點 normalize 到 `current_world_radius + GRID_RADIUS_OFFSET`；目前 runtime 參數為：
+  - `surface_grid_cube_face_subdivisions = 12`
+  - `surface_grid_segments_per_cell = 8`
+  - `surface_grid_lane_guide_extent_lanes = 1`
+  - `surface_grid_lane_guide_angle_steps = 144`
+- cube face seam 需避免重複畫線造成接縫過亮；目前由 `RunWorld.gd` 以 normalized 端點 key 去重。
+- `SurfaceGrid`、`SurfaceLaneGuides`、`SurfaceCenterLaneGuide` 都只能作為 visual reference，不得參與玩家移動控制。
+- `SurfaceCenterLaneGuide` 的中央主線維持 `x = 0.0`，只用來對齊初始 `lane_target = 0` 的站位。
+- 不要加入自動 snap、align、round 或 `move_toward` 把玩家拉到格線、lane guide 或中央線。
+- A/D、←/→ 按住時維持原本連續左右移動；放開後 `lane_target` 停在當前位置，不自動回中線。
+- 滑鼠目前不控制 RunWorld 左右方向；不要重新用滑鼠覆寫 `lane_target`，除非使用者明確要求恢復滑鼠操作。
+- `player_lane` 可以繼續由 `round(lane_target / _lane_step())` 計算，僅供事件判定；`player_lane` 不得反向修改 `lane_target`。
+- 若需要 clamp，只能 clamp 到原本 `_player_move_limit()` 合法範圍；續跑資料也只做合法範圍 clamp，不得 round 到 lane guide。
+
 ## 局外 Hub 鏡頭與物件佈局規則
 
 - 規則頁：`局外鏡頭及物件佈局規則`

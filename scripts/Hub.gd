@@ -19,6 +19,7 @@ const HUB_SPHERE_CONTROLLER := preload("res://scripts/HubSphereController.gd")
 @export var project_scene_primitives_to_sphere := true
 @export var hub_placement_plane_size := 12.0
 @export var show_hub_placement_plane_debug := true
+@export var show_hub_grid_alignment_debug := false
 
 var module_buttons := {}
 var expectation_label: Label
@@ -71,6 +72,7 @@ func _apply_hub_sphere_settings() -> void:
 	hub_sphere_controller.project_scene_primitives_to_sphere = project_scene_primitives_to_sphere
 	hub_sphere_controller.hub_placement_plane_size = hub_placement_plane_size
 	hub_sphere_controller.show_hub_placement_plane_debug = show_hub_placement_plane_debug
+	hub_sphere_controller.show_hub_grid_alignment_debug = show_hub_grid_alignment_debug
 
 
 func _build_ui() -> void:

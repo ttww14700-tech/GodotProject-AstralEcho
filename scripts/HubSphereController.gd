@@ -29,6 +29,7 @@ signal central_tower_interaction_changed(active: bool)
 @export var project_scene_primitives_to_sphere := true
 @export var hub_placement_plane_size := 12.0
 @export var show_hub_placement_plane_debug := true
+@export var show_hub_grid_alignment_debug := false
 
 const PLAYER_RADIUS_RATIO := 0.16
 const CAMERA_DISTANCE_RATIO := 2.2
@@ -39,7 +40,7 @@ const SURFACE_GRID_EXTENT_RATIO := 0.82
 const SURFACE_GRID_STEP := 4.0
 const SURFACE_GRID_SEGMENT_STEP := 1.0
 const DEBUG_PANEL_WIDTH := 430.0
-const DEBUG_PANEL_HEIGHT := 540.0
+const DEBUG_PANEL_HEIGHT := 280.0
 const HUB_CAMERA_MODE := "Angled Mid Follow"
 const RECENT_MOVE_DEBUG_HOLD_TIME := 0.5
 const HUB_REFERENCE_BOX_SPECS := [
@@ -60,6 +61,8 @@ var hub_sphere_visual: Node3D
 var hub_sphere_mesh: MeshInstance3D
 var hub_reference_visuals: Node3D
 var hub_placement_plane_debug: MeshInstance3D
+var hub_logical_origin_marker: MeshInstance3D
+var hub_visual_grid_center_marker: MeshInstance3D
 var player_node: Node3D
 var player_mesh: MeshInstance3D
 var camera_rig: Node3D
@@ -89,6 +92,8 @@ var central_tower_interaction_active := false
 
 func _ready() -> void:
 	_build_hub_sphere()
+	_setup_hub_logical_origin_marker()
+	_setup_hub_visual_grid_center_marker()
 	_build_player()
 	_update_player_visual()
 	_setup_hub_reference_primitives()
@@ -102,6 +107,8 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_update_recent_move_debug_timer(delta)
 	_update_player_movement(delta)
+	_update_hub_visual_grid_center_marker()
+	_update_grid_alignment_debug_visibility()
 	_update_player_visual()
 	_update_central_tower_interaction()
 	_update_camera_transform(delta)
@@ -271,6 +278,58 @@ func _setup_placement_plane_debug() -> void:
 	hub_placement_plane_debug.position = Vector3.ZERO
 	hub_placement_plane_debug.rotation = Vector3.ZERO
 	hub_placement_plane_debug.visible = show_hub_placement_plane_debug
+
+
+func _setup_hub_logical_origin_marker() -> void:
+	hub_logical_origin_marker = get_node_or_null("HubLogicalOriginMarker") as MeshInstance3D
+	if not hub_logical_origin_marker:
+		hub_logical_origin_marker = MeshInstance3D.new()
+		hub_logical_origin_marker.name = "HubLogicalOriginMarker"
+		add_child(hub_logical_origin_marker)
+
+	var marker_mesh := SphereMesh.new()
+	marker_mesh.radius = 0.25
+	marker_mesh.height = 0.5
+	marker_mesh.radial_segments = 16
+	marker_mesh.rings = 8
+	hub_logical_origin_marker.mesh = marker_mesh
+	hub_logical_origin_marker.material_override = _material(Color(1.0, 0.86, 0.18))
+	hub_logical_origin_marker.position = _surface_position_from_offset(Vector2.ZERO)
+	hub_logical_origin_marker.rotation = Vector3.ZERO
+	_update_grid_alignment_debug_visibility()
+
+
+func _setup_hub_visual_grid_center_marker() -> void:
+	hub_visual_grid_center_marker = get_node_or_null("HubVisualGridCenterMarker") as MeshInstance3D
+	if not hub_visual_grid_center_marker:
+		hub_visual_grid_center_marker = MeshInstance3D.new()
+		hub_visual_grid_center_marker.name = "HubVisualGridCenterMarker"
+		add_child(hub_visual_grid_center_marker)
+
+	var marker_mesh := SphereMesh.new()
+	marker_mesh.radius = 0.18
+	marker_mesh.height = 0.36
+	marker_mesh.radial_segments = 16
+	marker_mesh.rings = 8
+	hub_visual_grid_center_marker.mesh = marker_mesh
+	hub_visual_grid_center_marker.material_override = _material(Color(0.95, 0.18, 0.18))
+	_update_hub_visual_grid_center_marker()
+	_update_grid_alignment_debug_visibility()
+
+
+func _update_hub_visual_grid_center_marker() -> void:
+	if not hub_visual_grid_center_marker or not hub_sphere_visual:
+		return
+
+	var grid_center_local := _surface_grid_point(Vector2.ZERO, hub_sphere_radius + GRID_RADIUS_OFFSET)
+	hub_visual_grid_center_marker.global_position = hub_sphere_visual.to_global(grid_center_local)
+
+
+func _update_grid_alignment_debug_visibility() -> void:
+	if hub_logical_origin_marker:
+		hub_logical_origin_marker.visible = show_hub_grid_alignment_debug
+	if hub_visual_grid_center_marker:
+		hub_visual_grid_center_marker.visible = show_hub_grid_alignment_debug
 
 
 func _setup_central_tower_interaction_capsule() -> void:
@@ -498,41 +557,45 @@ func _update_debug_label() -> void:
 	if not debug_label:
 		return
 
-	var runtime_camera_fov := hub_camera.fov if hub_camera else hub_camera_fov
-	debug_label.text = "Hub Move Debug\nHub Camera: %s\ncontroller_path: %s\ncamera_node_path: %s\ncamera_pitch_deg: %.2f\ncamera_yaw_offset_deg: %.2f\ncamera_distance: %.2f\ncamera_height: %.2f\ncamera_look_at_height: %.2f\nhub_camera_screen_offset_y: %.2f\nhub_camera_fov: %.2f\nplayer_move_distance: %.4f\nsphere_radius: %.2f\nvisual_rotation_multiplier: %.2f\ncalculated_rotation_radian: %.5f\nhub_walk_radius: %.2f\nlogical_hub_position: (%.2f, %.2f)\nplayer_visual_offset: %.3f\nplayer_distance_from_hub_center: %.4f\nwalk_radius_limited: %s\ncounter_axis: (%.2f, %.2f, %.2f)\nrecent_hold: %.2f\nlast_input_dir: (%.2f, %.2f)\nlast_move_distance: %.4f\nlast_rotation_radian: %.5f\nlast_counter_axis: (%.2f, %.2f, %.2f)\nlast_visual_rotation: %.5f" % [
-		HUB_CAMERA_MODE,
-		str(get_path()),
-		str(hub_camera.get_path()) if hub_camera else "<none>",
-		hub_camera_pitch_deg,
-		hub_camera_yaw_offset_deg,
-		hub_camera_distance,
-		hub_camera_height,
-		hub_camera_look_at_height,
-		hub_camera_screen_offset_y,
-		runtime_camera_fov,
-		last_player_move_distance,
-		hub_sphere_radius,
-		visual_rotation_multiplier,
-		last_calculated_rotation_radian,
-		hub_walk_radius,
-		logical_hub_position.x,
-		logical_hub_position.y,
-		player_visual_offset.length(),
-		_get_player_distance_from_hub_center(),
-		"YES" if last_is_walk_radius_limited else "NO",
-		last_counter_rotation_axis.x,
-		last_counter_rotation_axis.y,
-		last_counter_rotation_axis.z,
-		recent_move_debug_timer,
-		recent_input_dir.x,
-		recent_input_dir.y,
-		recent_move_distance,
-		recent_rotation_radian,
-		recent_counter_axis.x,
-		recent_counter_axis.y,
-		recent_counter_axis.z,
-		recent_visual_rotation
+	var player_global_position := player_node.global_position if player_node else Vector3.ZERO
+	var player_local_position := player_node.position if player_node else Vector3.ZERO
+	var player_bottom_projected_point := _get_player_bottom_projected_point()
+	var sphere_rotation_degrees := hub_sphere_visual.rotation_degrees if hub_sphere_visual else Vector3.ZERO
+	var camera_global_rotation_degrees := hub_camera.global_rotation_degrees if hub_camera else Vector3.ZERO
+	debug_label.text = "Hub Spawn Debug\nplayer global_position: %s\nplayer local position: %s\nlogical_hub_position: %s\nplayer bottom projected point: %s\nHub controller global_position: %s\nHubSphereVisual rotation_degrees: %s\ncamera global_rotation_degrees: %s" % [
+		_format_vector3(player_global_position),
+		_format_vector3(player_local_position),
+		_format_vector2(logical_hub_position),
+		_format_vector3(player_bottom_projected_point),
+		_format_vector3(global_position),
+		_format_vector3(sphere_rotation_degrees),
+		_format_vector3(camera_global_rotation_degrees)
 	]
+	if show_hub_grid_alignment_debug:
+		debug_label.text += "\norigin_grid_center_distance: %.3f" % _get_origin_grid_center_distance()
+
+
+func _get_origin_grid_center_distance() -> float:
+	if not hub_logical_origin_marker or not hub_visual_grid_center_marker:
+		return 0.0
+	return hub_logical_origin_marker.global_position.distance_to(hub_visual_grid_center_marker.global_position)
+
+
+func _get_player_bottom_projected_point() -> Vector3:
+	if not player_node:
+		return Vector3.ZERO
+
+	var player_bottom_local := player_node.position
+	var projected_local := _surface_position_from_offset(Vector2(player_bottom_local.x, player_bottom_local.z))
+	return global_transform * projected_local
+
+
+func _format_vector2(value: Vector2) -> String:
+	return "(%.3f, %.3f)" % [value.x, value.y]
+
+
+func _format_vector3(value: Vector3) -> String:
+	return "(%.3f, %.3f, %.3f)" % [value.x, value.y, value.z]
 
 
 func _get_player_distance_from_hub_center() -> float:

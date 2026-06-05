@@ -147,11 +147,16 @@ func _create_surface_grid_mesh() -> Mesh:
 	var extent := radius * SURFACE_GRID_EXTENT_RATIO
 
 	mesh.surface_begin(Mesh.PRIMITIVE_LINES)
-	var line_count := int(floor(extent * 2.0 / SURFACE_GRID_STEP))
-	for line_index in range(line_count + 1):
-		var offset := -extent + float(line_index) * SURFACE_GRID_STEP
-		_add_projected_grid_line(mesh, Vector2(offset, -extent), Vector2(offset, extent), radius)
-		_add_projected_grid_line(mesh, Vector2(-extent, offset), Vector2(extent, offset), radius)
+	var offsets := [0.0]
+	var offset := SURFACE_GRID_STEP
+	while offset <= extent:
+		offsets.append(-offset)
+		offsets.append(offset)
+		offset += SURFACE_GRID_STEP
+
+	for line_offset in offsets:
+		_add_projected_grid_line(mesh, Vector2(line_offset, -extent), Vector2(line_offset, extent), radius)
+		_add_projected_grid_line(mesh, Vector2(-extent, line_offset), Vector2(extent, line_offset), radius)
 	mesh.surface_end()
 	return mesh
 

@@ -51,17 +51,19 @@ https://app.notion.com/p/GodotProject-AstralEcho-370dacf0068d80dd93b8f7286e4935d
   - `hub_walk_radius = 70.0`
   - `hub_sphere_radius = 70.0`
   - `hub_camera_pitch_deg = 42.0`
-  - `hub_camera_yaw_offset_deg = 8.0`
+  - `hub_camera_yaw_offset_deg = 0.0`
   - `hub_camera_distance = 17.5`
   - `hub_camera_height = 15.0`
   - `hub_camera_look_at_height = 1.3`
-  - `hub_camera_screen_offset_y = 0.10`
+  - `hub_camera_screen_offset_y = 0.0`
   - `hub_camera_fov = 35.0`
   - `project_scene_primitives_to_sphere = true`
   - `hub_placement_plane_size = 12.0`
-  - `show_hub_placement_plane_debug = true`
+  - `show_hub_placement_plane_debug = false`
+  - `show_hub_grid_alignment_debug = true`
 - Hub 球面地板格線需使用「平面方格投影到球面」的方式，不要使用會在角色腳下匯聚的經緯線格線。
 - Hub 球面方格由 `HubSphereController.gd` 的 `SURFACE_GRID_EXTENT_RATIO`、`SURFACE_GRID_STEP`、`SURFACE_GRID_SEGMENT_STEP` 控制。
+- HubSurfaceGrid offset 生成需以 `0.0` 為中心往正負兩側展開，必須永遠包含 `x = 0` 與 `z = 0` 中心線；不要用從 `-extent` 起算的累加方式造成中心線缺失。
 - Hub 物件佈局採用「平面編輯，運行時投影到球面」：
   - 物件放在 `HubSphereController/HubPrimitiveReferenceVisuals` 底下。
   - 場景編輯時，`position.x` / `position.z` 是平面擺放座標。
@@ -81,6 +83,7 @@ https://app.notion.com/p/GodotProject-AstralEcho-370dacf0068d80dd93b8f7286e4935d
   - `hub_sphere_radius`
   - `hub_camera_fov`
   - `hub_camera_screen_offset_y`
+  - `show_hub_grid_alignment_debug`
 - 使用者已於 2026-06-02 測試確認：物件可直接移動到位置上，並可調整大小；目前版本可用。
 - 使用者已於 2026-06-03 要求依範本直接調整；目前版本包含球面方格地板、前景物件、中央基座與左右 landmark。
 

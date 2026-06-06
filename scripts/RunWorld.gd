@@ -16,10 +16,16 @@ const MONSTER_CHASE_SPEED := 0.8
 const GRID_RADIUS_OFFSET := 0.018
 const GIANT_RESONANCE_STEP := 10.0
 const GIANT_MONSTER_SCALE := 2.5
+const MONSTER_GROUP_MIN_COUNT := 2
+const MONSTER_GROUP_MAX_COUNT := 5
+const MONSTER_SCATTER_NEAR_CHANCE := 0.65
+const MONSTER_SCATTER_NEAR_RADIUS_RATIO := 0.18
+const MONSTER_SCATTER_FAR_RADIUS_RATIO := 0.55
 const NORMAL_MONSTER_MIN_SCALE := 1.1
 const NORMAL_MONSTER_MAX_SCALE := 1.5
 const EVENT_SPAWN_ANGLE := -0.9
 const EVENT_GROUP_ANGLE_STEP := 0.08
+const RUN_PERFORMANCE_SAMPLE_INTERVAL := 0.35
 const WORLD_SIZE_OPTIONS := [
 	{"name": "小型球", "scale": 1.3},
 	{"name": "中型球", "scale": 2.2},
@@ -99,6 +105,9 @@ var preview_group_serial := 0
 var control_scheme := "keyboard"
 var current_surface_speed := 0.0
 var current_world_rotation_speed := 0.0
+var fps_display := 0.0
+var lowest_fps_display := INF
+var performance_sample_timer := 0.0
 var current_world_size_name := "小型球"
 var current_world_scale := 1.0
 var current_world_radius := WORLD_RADIUS
@@ -164,6 +173,7 @@ func _process(delta: float) -> void:
 	_update_run(delta)
 	_update_events(delta)
 	_update_visuals(delta)
+	_update_performance_debug(delta)
 	_update_hud()
 
 
@@ -985,7 +995,7 @@ func _update_hud() -> void:
 	var control_text := "鍵盤" if control_scheme == "keyboard" else "滑鼠"
 	var slow_text := "慢速中" if Input.is_action_pressed("slow_down") else "一般"
 	var surface_speed_multiplier := _get_surface_speed_multiplier()
-	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n球體 %s x%.1f / 半徑 %.2f / surface倍率 %.0f%% / surface %.2f / angular %.4f\nlane_target %.3f / player_lane %d / grid_center_offset %.3f / lane_offset %.3f\n控制 %s / 速度 %s / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
+	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n球體 %s x%.1f / 半徑 %.2f / surface倍率 %.0f%% / surface %.2f / angular %.4f\nlane_target %.3f / player_lane %d / grid_center_offset %.3f / lane_offset %.3f\nFPS %.0f / 最低 %.0f / 場上事件 %d / 預告事件 %d / 怪物 %d+%d\n控制 %s / 速度 %s / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
 		_format_time(elapsed),
 		concentration,
 		resonance_gained,
@@ -1002,6 +1012,12 @@ func _update_hud() -> void:
 		player_lane,
 		_grid_center_offset(),
 		_lane_center_offset(),
+		fps_display,
+		lowest_fps_display if lowest_fps_display < INF else fps_display,
+		active_events.size(),
+		preview_event_queue.size(),
+		_count_active_events_of_type("monster"),
+		_count_preview_events_of_type("monster"),
 		control_text,
 		slow_text,
 		dodge_cooldown,
@@ -1013,7 +1029,7 @@ func _update_hud() -> void:
 func _spawn_event() -> void:
 	var event_type := _pick_event_type()
 	if event_type == "monster":
-		var group_count := randi_range(1, 3)
+		var group_count := randi_range(MONSTER_GROUP_MIN_COUNT, MONSTER_GROUP_MAX_COUNT)
 		var group_id := _next_preview_group_id()
 		for index in group_count:
 			var lane := randi_range(-1, 1)
@@ -1032,8 +1048,10 @@ func _next_preview_group_id() -> int:
 func _queue_preview_event(event_type: String, lane: int, is_giant := false, group_id := 0, group_member_index := 0, angle_offset := 0.0) -> void:
 	preview_event_serial += 1
 	var size_multiplier := 1.0
+	var spawn_x: Variant = null
 	if event_type == "monster":
 		size_multiplier = GIANT_MONSTER_SCALE if is_giant else randf_range(NORMAL_MONSTER_MIN_SCALE, NORMAL_MONSTER_MAX_SCALE)
+		spawn_x = _random_monster_spawn_x(lane)
 	var max_preview_angle := _resolved_event_preview_lead_angle()
 	var spawn_angle := EVENT_SPAWN_ANGLE + angle_offset
 	var grid_cell := _create_event_preview_grid_cell(lane, spawn_angle)
@@ -1054,6 +1072,7 @@ func _queue_preview_event(event_type: String, lane: int, is_giant := false, grou
 		"angle_offset": angle_offset,
 		"handoff_state": "queued",
 		"handoff_alpha": 1.0,
+		"spawn_x": spawn_x,
 		"size_multiplier": size_multiplier,
 		"color": _event_color(event_type)
 	}
@@ -1082,12 +1101,13 @@ func _flush_preview_event_to_active(preview_event: Dictionary) -> void:
 		float(preview_event.get("spawn_angle", EVENT_SPAWN_ANGLE)),
 		bool(preview_event.get("is_giant", false)),
 		float(preview_event.get("size_multiplier", 1.0)),
-		grid_cell
+		grid_cell,
+		preview_event.get("spawn_x", null)
 	)
 	preview_event_queue.erase(preview_event)
 
 
-func _create_event(event_type: String, lane: int, angle: float, is_giant := false, size_multiplier := 0.0, grid_cell: Dictionary = {}) -> void:
+func _create_event(event_type: String, lane: int, angle: float, is_giant := false, size_multiplier := 0.0, grid_cell: Dictionary = {}, spawn_x: Variant = null) -> void:
 	event_serial += 1
 	var marker: Node3D
 	if event_type == "monster":
@@ -1110,11 +1130,12 @@ func _create_event(event_type: String, lane: int, angle: float, is_giant := fals
 	var resolved_grid_cell := grid_cell.duplicate(true)
 	if resolved_grid_cell.is_empty():
 		resolved_grid_cell = _create_event_preview_grid_cell(lane, angle)
-	var start_x := float(resolved_grid_cell.get("x", float(lane) * _lane_step()))
+	var start_x := _resolve_event_spawn_x(event_type, lane, resolved_grid_cell, spawn_x)
 	var start_angle := float(resolved_grid_cell.get("spawn_angle", angle))
+	var start_lane := clampi(roundi(start_x / _lane_step()), -1, 1)
 	var event := {
 		"type": event_type,
-		"lane": lane,
+		"lane": start_lane,
 		"x": start_x,
 		"angle": start_angle,
 		"node": marker,
@@ -1124,6 +1145,45 @@ func _create_event(event_type: String, lane: int, angle: float, is_giant := fals
 	active_events.append(event)
 	_position_event(event)
 	_print_event_preview_active_spawn_debug(event)
+
+
+func _resolve_event_spawn_x(event_type: String, lane: int, grid_cell: Dictionary, spawn_x: Variant) -> float:
+	if event_type == "monster" and (typeof(spawn_x) == TYPE_FLOAT or typeof(spawn_x) == TYPE_INT):
+		return clampf(float(spawn_x), -_player_move_limit(), _player_move_limit())
+	return float(grid_cell.get("x", float(lane) * _lane_step()))
+
+
+func _random_monster_spawn_x(lane: int) -> float:
+	var base_x := _lane_center_x(lane)
+	var move_limit := _player_move_limit()
+	var min_offset := -move_limit - base_x
+	var max_offset := move_limit - base_x
+	var lane_step := _lane_step()
+	var near_radius := lane_step * MONSTER_SCATTER_NEAR_RADIUS_RATIO
+	var far_radius := lane_step * MONSTER_SCATTER_FAR_RADIUS_RATIO
+
+	if randf() <= MONSTER_SCATTER_NEAR_CHANCE:
+		return base_x + randf_range(maxf(-near_radius, min_offset), minf(near_radius, max_offset))
+
+	var far_offset := _random_monster_far_offset(near_radius, far_radius, min_offset, max_offset)
+	return base_x + far_offset
+
+
+func _random_monster_far_offset(near_radius: float, far_radius: float, min_offset: float, max_offset: float) -> float:
+	var left_capacity := -min_offset
+	var right_capacity := max_offset
+	var can_scatter_left := left_capacity > near_radius
+	var can_scatter_right := right_capacity > near_radius
+	if not can_scatter_left and not can_scatter_right:
+		return randf_range(maxf(-near_radius, min_offset), minf(near_radius, max_offset))
+
+	var scatter_right := can_scatter_right
+	if can_scatter_left and can_scatter_right:
+		scatter_right = randf() < 0.5
+
+	if scatter_right:
+		return randf_range(near_radius, minf(far_radius, right_capacity))
+	return -randf_range(near_radius, minf(far_radius, left_capacity))
 
 
 func _position_event(event: Dictionary) -> void:
@@ -1215,18 +1275,18 @@ func _pick_event_type() -> String:
 	var weights: Dictionary = GameState.get_selected_module_data()["weights"].duplicate(true)
 	var minute := elapsed / 60.0
 	if minute < 1.0:
-		weights = {"resource": 1.6, "mine": 0.7, "monster": 0.45, "memory": 0.45}
+		weights = {"resource": 1.6, "mine": 0.7, "monster": 0.6, "memory": 0.45}
 	elif minute >= 4.0 and minute < 6.0:
 		weights["mine"] *= 1.45
-		weights["monster"] *= 1.25
+		weights["monster"] *= 1.45
 	elif minute >= 6.0 and minute < 8.0:
 		weights["memory"] *= 1.85
 	elif minute >= 8.0:
-		weights["monster"] *= 1.35
+		weights["monster"] *= 1.65
 		weights["memory"] *= 1.25
 	if entered_danger:
 		weights["resource"] *= 0.55
-		weights["monster"] *= 1.8
+		weights["monster"] *= 2.2
 		weights["memory"] *= 1.35
 		weights["mine"] *= 1.25
 
@@ -1239,6 +1299,31 @@ func _pick_event_type() -> String:
 		if roll <= 0.0:
 			return key
 	return "resource"
+
+
+func _update_performance_debug(delta: float) -> void:
+	performance_sample_timer -= delta
+	if performance_sample_timer > 0.0:
+		return
+	performance_sample_timer = RUN_PERFORMANCE_SAMPLE_INTERVAL
+	fps_display = float(Engine.get_frames_per_second())
+	lowest_fps_display = minf(lowest_fps_display, fps_display)
+
+
+func _count_active_events_of_type(event_type: String) -> int:
+	var count := 0
+	for event in active_events:
+		if String(event.get("type", "")) == event_type:
+			count += 1
+	return count
+
+
+func _count_preview_events_of_type(event_type: String) -> int:
+	var count := 0
+	for event in preview_event_queue:
+		if String(event.get("type", "")) == event_type:
+			count += 1
+	return count
 
 
 func _remove_event(event: Dictionary) -> void:

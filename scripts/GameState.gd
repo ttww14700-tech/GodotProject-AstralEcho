@@ -6,22 +6,22 @@ const MODULES := {
 	"gather": {
 		"name": "採集型",
 		"description": "提高資源點與礦點傾向，適合穩定累積素材。",
-		"weights": {"resource": 1.55, "mine": 1.74, "monster": 0.85, "memory": 0.95}
+		"weights": {"resource": 1.55, "mine": 1.74, "monster": 1.2, "memory": 0.95}
 	},
 	"combat": {
 		"name": "戰鬥型",
 		"description": "提高怪物與危險事件傾向，適合測試戰鬥收益。",
-		"weights": {"resource": 0.9, "mine": 0.9, "monster": 1.65, "memory": 0.95}
+		"weights": {"resource": 0.9, "mine": 0.9, "monster": 2.2, "memory": 0.95}
 	},
 	"explore": {
 		"name": "探索型",
 		"description": "提高記憶碎片與線索傾向，適合推進世界復原。",
-		"weights": {"resource": 1.0, "mine": 0.9, "monster": 0.9, "memory": 1.7}
+		"weights": {"resource": 1.0, "mine": 0.9, "monster": 1.15, "memory": 1.7}
 	},
 	"danger": {
 		"name": "危險期型",
 		"description": "提高後段高風險收益，適合撐進低濃度階段。",
-		"weights": {"resource": 0.9, "mine": 1.0, "monster": 1.25, "memory": 1.2}
+		"weights": {"resource": 0.9, "mine": 1.0, "monster": 1.8, "memory": 1.2}
 	}
 }
 

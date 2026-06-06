@@ -1,6 +1,9 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/models/test/AE_FireRockGolem_mesh_Decimated.glb" id="1_fire_rock_golem"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body_collision"]
+size = Vector3(0.6, 1, 1)
 
 [node name="AE_FireRockGolem_TestWrapper" type="Node3D"]
 
@@ -9,5 +12,11 @@
 [node name="AE_FireRockGolem_mesh_Decimated" parent="ModelRoot" instance=ExtResource("1_fire_rock_golem")]
 
 [node name="CollisionRoot" type="Node3D" parent="."]
+
+[node name="BodyCollision" type="StaticBody3D" parent="CollisionRoot"]
+
+[node name="BodyCollisionShape" type="CollisionShape3D" parent="CollisionRoot/BodyCollision"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+shape = SubResource("BoxShape3D_body_collision")
 
 [node name="AnimationRoot" type="Node3D" parent="."]

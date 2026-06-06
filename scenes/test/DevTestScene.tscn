@@ -1,7 +1,9 @@
-[gd_scene load_steps=5 format=3 uid="uid://tjb0j0ptysrp"]
+[gd_scene format=3 uid="uid://tjb0j0ptysrp"]
 
 [ext_resource type="PackedScene" path="res://scenes/models/test/AE_FireRockGolem_TestWrapper.tscn" id="1_fire_rock_golem_wrapper"]
-[ext_resource type="Script" path="res://scripts/test/DevTestDebugInfo.gd" id="2_debug_info"]
+[ext_resource type="Script" uid="uid://ov5i68v4ffng" path="res://scripts/test/DevTestDebugInfo.gd" id="2_debug_info"]
+[ext_resource type="PackedScene" uid="uid://dv1yuh6g2umvw" path="res://scenes/test/MonsterScaleReference.tscn" id="3_scale_reference"]
+[ext_resource type="Script" uid="uid://d0us318od0bjj" path="res://scripts/test/TestCollisionPawn.gd" id="4_test_collision_pawn"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_reference_floor"]
 albedo_color = Color(0.32, 0.34, 0.36, 1)
@@ -9,6 +11,29 @@ roughness = 0.85
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_reference_floor"]
 size = Vector2(20, 20)
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_test_collision_pawn"]
+radius = 0.3
+height = 1.7
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_test_pawn_body"]
+transparency = 1
+albedo_color = Color(0.2, 0.7, 0.95, 0.45)
+roughness = 0.7
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_test_collision_pawn"]
+radius = 0.3
+height = 1.7
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_test_pawn_marker"]
+albedo_color = Color(0.85, 0.9, 0.92, 1)
+roughness = 0.6
+emission_enabled = true
+emission = Color(0.35, 0.55, 0.65, 1)
+emission_energy_multiplier = 0.2
+
+[sub_resource type="BoxMesh" id="BoxMesh_test_pawn_forward_marker"]
+size = Vector3(0.12, 0.12, 0.45)
 
 [node name="DevTestScene" type="Node3D" unique_id=1890382338]
 
@@ -27,17 +52,72 @@ transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 4, 7)
 current = true
 fov = 50.0
 
+[node name="ScaleReferenceRoot" type="Node3D" parent="." unique_id=251845974]
+
+[node name="PlayerScaleReference" parent="ScaleReferenceRoot" unique_id=775533581 instance=ExtResource("3_scale_reference")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.2, 0, -3.2)
+
+[node name="SmallMonsterScaleReference" parent="ScaleReferenceRoot" unique_id=1433987380 instance=ExtResource("3_scale_reference")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.4, 0, -3.2)
+reference_kind = 1
+
+[node name="MediumMonsterScaleReference" parent="ScaleReferenceRoot" unique_id=768958679 instance=ExtResource("3_scale_reference")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.4, 0, -3.2)
+reference_kind = 2
+
+[node name="LargeMonsterScaleReference" parent="ScaleReferenceRoot" unique_id=1796432732 instance=ExtResource("3_scale_reference")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.2, 0, -3.2)
+reference_kind = 3
+
 [node name="PlayerTestRoot" type="Node3D" parent="." unique_id=257711114]
+
+[node name="CharacterScaleReference" parent="PlayerTestRoot" unique_id=1787783120 instance=ExtResource("3_scale_reference")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.2, 0, 0)
+
+[node name="TestCollisionPawn" type="CharacterBody3D" parent="PlayerTestRoot" unique_id=907985630]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.6, 0, 1)
+script = ExtResource("4_test_collision_pawn")
+
+[node name="PawnCollisionShape" type="CollisionShape3D" parent="PlayerTestRoot/TestCollisionPawn" unique_id=225751625]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.85, 0)
+shape = SubResource("CapsuleShape3D_test_collision_pawn")
+
+[node name="PawnVisual" type="MeshInstance3D" parent="PlayerTestRoot/TestCollisionPawn" unique_id=2113908556]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.85, 0)
+material_override = SubResource("StandardMaterial3D_test_pawn_body")
+mesh = SubResource("CapsuleMesh_test_collision_pawn")
+
+[node name="ForwardMarker" type="MeshInstance3D" parent="PlayerTestRoot/TestCollisionPawn" unique_id=1876349488]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, -0.34)
+material_override = SubResource("StandardMaterial3D_test_pawn_marker")
+mesh = SubResource("BoxMesh_test_pawn_forward_marker")
 
 [node name="ModelTestRoot" type="Node3D" parent="." unique_id=1244175206]
 
-[node name="FireRockGolemTest" parent="ModelTestRoot" instance=ExtResource("1_fire_rock_golem_wrapper")]
+[node name="FireRockGolemTest" parent="ModelTestRoot" unique_id=279477460 instance=ExtResource("1_fire_rock_golem_wrapper")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.1954346, 0, 0)
+
+[node name="FireRockGolemScaleTestRoot" type="Node3D" parent="ModelTestRoot" unique_id=1234575789]
+
+[node name="FireRockGolem_Current" parent="ModelTestRoot/FireRockGolemScaleTestRoot" unique_id=1224638769 instance=ExtResource("1_fire_rock_golem_wrapper")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.6, 0, 3.2)
+
+[node name="CurrentLabel" type="Label3D" parent="ModelTestRoot/FireRockGolemScaleTestRoot" unique_id=1874614177]
+transform = Transform3D(0.7, 0, 0, 0, 0.7, 0, 0, 0, 0.7, -1.6, 1.4, 3.2)
+text = "Current"
+
+[node name="FireRockGolem_Target_1_5" parent="ModelTestRoot/FireRockGolemScaleTestRoot" unique_id=1376323725 instance=ExtResource("1_fire_rock_golem_wrapper")]
+transform = Transform3D(1.499608, 0, 0, 0, 1.499608, 0, 0, 0, 1.499608, 0.080834985, 0, 0.011889696)
+
+[node name="TargetLabel" type="Label3D" parent="ModelTestRoot/FireRockGolemScaleTestRoot" unique_id=614083909]
+transform = Transform3D(0.7, 0, 0, 0, 0.7, 0, 0, 0, 0.7, 1.6, 1.9, 3.2)
+text = "Target 1.5m"
 
 [node name="DebugRoot" type="Node3D" parent="." unique_id=1060771370]
 
-[node name="DebugInfoLabel3D" type="Label3D" parent="DebugRoot"]
+[node name="DebugInfoLabel3D" type="Label3D" parent="DebugRoot" unique_id=100264269]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.8, 2.7, 0)
 text = "No model target found"
-horizontal_alignment = 0
 font_size = 20
+horizontal_alignment = 0
 script = ExtResource("2_debug_info")

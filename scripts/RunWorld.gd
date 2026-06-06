@@ -4,6 +4,7 @@ signal run_finished(result: Dictionary)
 
 const RUN_EVENT_PREVIEW_LAYER_SCRIPT := preload("res://scripts/RunEventPreviewLayer.gd")
 const RUN_EVENT_PREVIEW_LAYER_SCENE := preload("res://scenes/ui/RunEventPreviewLayer.tscn")
+const RUN_MONSTER_PLACEHOLDER_SCENE := preload("res://scenes/monsters/RunMonsterPlaceholder.tscn")
 const RUN_DURATION := 600.0
 const WORLD_RADIUS := 8.0
 const EVENT_TRIGGER_ANGLE := 0.08
@@ -1088,15 +1089,22 @@ func _flush_preview_event_to_active(preview_event: Dictionary) -> void:
 
 func _create_event(event_type: String, lane: int, angle: float, is_giant := false, size_multiplier := 0.0, grid_cell: Dictionary = {}) -> void:
 	event_serial += 1
-	var marker := MeshInstance3D.new()
-	marker.name = "Event_%s_%d" % [event_type, event_serial]
-	marker.mesh = _event_mesh(event_type)
-	marker.material_override = _material(_event_color(event_type))
+	var marker: Node3D
 	if event_type == "monster":
+		marker = RUN_MONSTER_PLACEHOLDER_SCENE.instantiate() as Node3D
 		var monster_size := size_multiplier
 		if monster_size <= 0.0:
 			monster_size = GIANT_MONSTER_SCALE if is_giant else randf_range(NORMAL_MONSTER_MIN_SCALE, NORMAL_MONSTER_MAX_SCALE)
-		marker.scale = Vector3.ONE * monster_size
+		if marker.has_method("configure"):
+			marker.call("configure", monster_size, false)
+		else:
+			marker.scale = Vector3.ONE * monster_size
+	else:
+		var mesh_marker := MeshInstance3D.new()
+		mesh_marker.mesh = _event_mesh(event_type)
+		mesh_marker.material_override = _material(_event_color(event_type))
+		marker = mesh_marker
+	marker.name = "Event_%s_%d" % [event_type, event_serial]
 	add_child(marker)
 
 	var resolved_grid_cell := grid_cell.duplicate(true)
@@ -1122,15 +1130,18 @@ func _position_event(event: Dictionary) -> void:
 	var x: float = event.get("x", float(event["lane"]) * _lane_step())
 	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - x * x, 0.0))
 	var angle: float = event["angle"]
-	var marker: MeshInstance3D = event["node"]
+	var marker := event["node"] as Node3D
 	marker.position = Vector3(x, cos(angle) * local_radius + 0.18, sin(angle) * local_radius)
-	marker.look_at(Vector3(x, 0, 0), Vector3.UP)
+	if event["type"] == "monster" and marker.has_method("update_player_face_detection"):
+		marker.call("update_player_face_detection", _get_gameplay_player_position())
+	else:
+		marker.look_at(Vector3(x, 0, 0), Vector3.UP)
 
 
 func _print_event_preview_active_spawn_debug(event: Dictionary) -> void:
 	if not event_preview_debug_enabled:
 		return
-	var marker: MeshInstance3D = event["node"]
+	var marker := event["node"] as Node3D
 	var lane := int(event.get("lane", 0))
 	var start_x := float(event.get("x", float(lane) * _lane_step()))
 	var projected_screen_x := _projected_screen_x(marker.global_position)

@@ -1,0 +1,86 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/monsters/RunMonsterPlaceholder.gd" id="1_run_monster_placeholder"]
+[ext_resource type="PackedScene" path="res://scenes/models/test/AE_FireRockGolem_TestWrapper.tscn" id="2_fire_rock_golem_wrapper"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_forward_debug"]
+albedo_color = Color(0.95, 0.18, 0.14, 1)
+emission_enabled = true
+emission = Color(0.75, 0.08, 0.05, 1)
+emission_energy_multiplier = 0.35
+roughness = 0.55
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_right_debug"]
+albedo_color = Color(0.25, 0.85, 0.32, 1)
+emission_enabled = true
+emission = Color(0.08, 0.55, 0.16, 1)
+emission_energy_multiplier = 0.25
+roughness = 0.55
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_up_debug"]
+albedo_color = Color(0.25, 0.5, 1, 1)
+emission_enabled = true
+emission = Color(0.08, 0.25, 0.7, 1)
+emission_energy_multiplier = 0.25
+roughness = 0.55
+
+[sub_resource type="BoxMesh" id="BoxMesh_forward_debug"]
+size = Vector3(0.08, 0.08, 1.25)
+
+[sub_resource type="BoxMesh" id="BoxMesh_forward_tip"]
+size = Vector3(0.22, 0.22, 0.22)
+
+[sub_resource type="BoxMesh" id="BoxMesh_right_debug"]
+size = Vector3(0.95, 0.055, 0.055)
+
+[sub_resource type="BoxMesh" id="BoxMesh_up_debug"]
+size = Vector3(0.055, 1.25, 0.055)
+
+[node name="MonsterRoot" type="Node3D"]
+script = ExtResource("1_run_monster_placeholder")
+
+[node name="CollisionRoot" type="Node3D" parent="."]
+
+[node name="LogicRoot" type="Node3D" parent="."]
+
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="AE_FireRockGolem_TestWrapper" parent="VisualRoot" instance=ExtResource("2_fire_rock_golem_wrapper")]
+
+[node name="ForwardDebugRoot" type="Node3D" parent="."]
+visible = false
+
+[node name="ForwardMinusZ" type="MeshInstance3D" parent="ForwardDebugRoot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.35, -0.72)
+material_override = SubResource("StandardMaterial3D_forward_debug")
+mesh = SubResource("BoxMesh_forward_debug")
+
+[node name="ForwardMinusZTip" type="MeshInstance3D" parent="ForwardDebugRoot"]
+transform = Transform3D(0.65, 0, 0, 0, 0.65, 0, 0, 0, 0.65, 0, 1.35, -1.38)
+material_override = SubResource("StandardMaterial3D_forward_debug")
+mesh = SubResource("BoxMesh_forward_tip")
+
+[node name="RightPlusX" type="MeshInstance3D" parent="ForwardDebugRoot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.48, 1.15, 0)
+material_override = SubResource("StandardMaterial3D_right_debug")
+mesh = SubResource("BoxMesh_right_debug")
+
+[node name="UpPlusY" type="MeshInstance3D" parent="ForwardDebugRoot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+material_override = SubResource("StandardMaterial3D_up_debug")
+mesh = SubResource("BoxMesh_up_debug")
+
+[node name="ForwardLabel" type="Label3D" parent="ForwardDebugRoot"]
+transform = Transform3D(0.55, 0, 0, 0, 0.55, 0, 0, 0, 0.55, 0, 1.72, -1.55)
+text = "MonsterRoot -Z Forward"
+font_size = 28
+
+[node name="RightLabel" type="Label3D" parent="ForwardDebugRoot"]
+transform = Transform3D(0.45, 0, 0, 0, 0.45, 0, 0, 0, 0.45, 1.12, 1.23, 0)
+text = "+X Right"
+font_size = 24
+
+[node name="UpLabel" type="Label3D" parent="ForwardDebugRoot"]
+transform = Transform3D(0.45, 0, 0, 0, 0.45, 0, 0, 0, 0.45, 0.18, 1.6, 0)
+text = "+Y Up"
+font_size = 24

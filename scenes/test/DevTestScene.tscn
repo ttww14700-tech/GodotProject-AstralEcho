@@ -1,9 +1,10 @@
-[gd_scene format=3 uid="uid://tjb0j0ptysrp"]
+[gd_scene load_steps=13 format=3 uid="uid://tjb0j0ptysrp"]
 
 [ext_resource type="PackedScene" path="res://scenes/models/test/AE_FireRockGolem_TestWrapper.tscn" id="1_fire_rock_golem_wrapper"]
 [ext_resource type="Script" uid="uid://ov5i68v4ffng" path="res://scripts/test/DevTestDebugInfo.gd" id="2_debug_info"]
 [ext_resource type="PackedScene" uid="uid://dv1yuh6g2umvw" path="res://scenes/test/MonsterScaleReference.tscn" id="3_scale_reference"]
 [ext_resource type="Script" uid="uid://d0us318od0bjj" path="res://scripts/test/TestCollisionPawn.gd" id="4_test_collision_pawn"]
+[ext_resource type="PackedScene" path="res://scenes/monsters/RunMonsterPlaceholder.tscn" id="5_run_monster_placeholder"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_reference_floor"]
 albedo_color = Color(0.32, 0.34, 0.36, 1)
@@ -96,6 +97,16 @@ mesh = SubResource("BoxMesh_test_pawn_forward_marker")
 
 [node name="FireRockGolemTest" parent="ModelTestRoot" unique_id=279477460 instance=ExtResource("1_fire_rock_golem_wrapper")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.1954346, 0, 0)
+
+[node name="RunMonsterOrientationCheck" parent="ModelTestRoot" instance=ExtResource("5_run_monster_placeholder")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.95, 0, 0.5)
+show_forward_debug = true
+
+[node name="OrientationCheckLabel" type="Label3D" parent="ModelTestRoot"]
+transform = Transform3D(0.55, 0, 0, 0, 0.55, 0, 0, 0, 0.55, 2.95, 2.45, 0.5)
+text = "Monster orientation check\nMonsterRoot rotation = identity\nVisualRoot correction = 0\nFace detection uses temporary 3D distance\nTurns only when player is within detection\nCompare visual front with MonsterRoot -Z"
+font_size = 24
+horizontal_alignment = 1
 
 [node name="FireRockGolemScaleTestRoot" type="Node3D" parent="ModelTestRoot" unique_id=1234575789]
 

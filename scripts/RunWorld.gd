@@ -8,7 +8,7 @@ const RUN_MONSTER_PLACEHOLDER_SCENE := preload("res://scenes/monsters/RunMonster
 const RUN_DURATION := 600.0
 const WORLD_RADIUS := 8.0
 const EVENT_TRIGGER_ANGLE := 0.08
-const EVENT_EXPIRE_ANGLE := 0.75
+const EVENT_EXPIRE_ANGLE := 0.45
 const LANE_STEP := 4.4
 const PLAYER_MOVE_LIMIT := 5.2
 const LATERAL_SPEED := 3.2
@@ -23,13 +23,13 @@ const MONSTER_SCATTER_NEAR_RADIUS_RATIO := 0.18
 const MONSTER_SCATTER_FAR_RADIUS_RATIO := 0.55
 const NORMAL_MONSTER_MIN_SCALE := 1.1
 const NORMAL_MONSTER_MAX_SCALE := 1.5
-const EVENT_SPAWN_ANGLE := -0.9
+const EVENT_SPAWN_ANGLE := -1.05
 const EVENT_GROUP_ANGLE_STEP := 0.08
 const RUN_PERFORMANCE_SAMPLE_INTERVAL := 0.35
 const WORLD_SIZE_OPTIONS := [
-	{"name": "小型球", "scale": 1.3},
-	{"name": "中型球", "scale": 2.2},
-	{"name": "大型球", "scale": 3.0}
+	{"name": "小型球", "scale": 1.4},
+	{"name": "中型球", "scale": 2.0},
+	{"name": "大型球", "scale": 2.6}
 ]
 
 @export var base_surface_speed := 3.64
@@ -76,7 +76,8 @@ const WORLD_SIZE_OPTIONS := [
 @export var event_preview_use_grid_alignment := true
 @export var event_preview_grid_columns := 3
 @export var event_preview_grid_forward_bands := 4
-@export var event_preview_grid_lateral_span_lanes := 1.0
+@export var event_preview_grid_lateral_span_lanes := 0.75
+@export var event_point_lateral_grid_cells := 2.0
 @export var event_preview_grid_safe_screen_x_min := 0.08
 @export var event_preview_grid_safe_screen_x_max := 0.92
 @export var event_preview_projection_blend := 0.45
@@ -240,19 +241,21 @@ func _event_preview_grid_column_from_lane(lane: int) -> int:
 	return clampi(roundi(normalized * float(columns - 1)), 0, columns - 1)
 
 
-func _event_preview_grid_x_from_column(column: int) -> float:
+func _event_preview_grid_x_from_column(column: int, event_type := "") -> float:
+	if _uses_event_point_lateral_grid(event_type):
+		return _random_event_point_lateral_x()
 	var columns := maxi(event_preview_grid_columns, 1)
 	if columns <= 1:
 		return 0.0
 	var safe_column := clampi(column, 0, columns - 1)
-	var span_lanes := maxf(event_preview_grid_lateral_span_lanes, 0.001)
+	var lateral_extent := maxf(event_preview_grid_lateral_span_lanes, 0.001) * _lane_step()
 	var t := float(safe_column) / float(columns - 1)
-	return lerpf(-span_lanes * _lane_step(), span_lanes * _lane_step(), t)
+	return lerpf(-lateral_extent, lateral_extent, t)
 
 
-func _create_event_preview_grid_cell(lane: int, spawn_angle: float) -> Dictionary:
+func _create_event_preview_grid_cell(lane: int, spawn_angle: float, event_type := "") -> Dictionary:
 	var column := _event_preview_grid_column_from_lane(lane)
-	var grid_x := _event_preview_grid_x_from_column(column)
+	var grid_x := _event_preview_grid_x_from_column(column, event_type)
 	return {
 		"column": column,
 		"columns": maxi(event_preview_grid_columns, 1),
@@ -261,6 +264,26 @@ func _create_event_preview_grid_cell(lane: int, spawn_angle: float) -> Dictionar
 		"spawn_angle": spawn_angle,
 		"spawn_forward_band": 0
 	}
+
+
+func _uses_event_point_lateral_grid(event_type: String) -> bool:
+	return event_type != "" and event_type != "monster"
+
+
+func _event_point_lateral_grid_extent() -> float:
+	var subdivisions := float(maxi(surface_grid_cube_face_subdivisions, 2))
+	var grid_cells := maxf(event_point_lateral_grid_cells, 0.0)
+	var cube_offset := clampf(grid_cells * 2.0 / subdivisions, 0.0, 1.0)
+	if cube_offset <= 0.0:
+		return 0.0
+	return absf(_cube_sphere_point(2, Vector2(cube_offset, 0.0), current_world_radius).x)
+
+
+func _random_event_point_lateral_x() -> float:
+	var lateral_extent := _event_point_lateral_grid_extent()
+	if lateral_extent <= 0.0:
+		return 0.0
+	return randf_range(-lateral_extent, lateral_extent)
 
 
 func _event_preview_grid_cell_label(grid_cell: Dictionary) -> String:
@@ -745,7 +768,7 @@ func _update_preview_event_grid_projections() -> void:
 		var spawn_angle := float(preview_event.get("spawn_angle", EVENT_SPAWN_ANGLE))
 		var grid_cell: Dictionary = preview_event.get("grid_cell", {})
 		if grid_cell.is_empty():
-			grid_cell = _create_event_preview_grid_cell(lane, spawn_angle)
+			grid_cell = _create_event_preview_grid_cell(lane, spawn_angle, String(preview_event.get("type", "")))
 			preview_event["grid_cell"] = grid_cell
 
 		var max_preview_angle := maxf(float(preview_event.get("max_preview_angle", 0.001)), 0.001)
@@ -1054,7 +1077,7 @@ func _queue_preview_event(event_type: String, lane: int, is_giant := false, grou
 		spawn_x = _random_monster_spawn_x(lane)
 	var max_preview_angle := _resolved_event_preview_lead_angle()
 	var spawn_angle := EVENT_SPAWN_ANGLE + angle_offset
-	var grid_cell := _create_event_preview_grid_cell(lane, spawn_angle)
+	var grid_cell := _create_event_preview_grid_cell(lane, spawn_angle, event_type)
 	var preview_event := {
 		"id": preview_event_serial,
 		"type": event_type,
@@ -1129,7 +1152,7 @@ func _create_event(event_type: String, lane: int, angle: float, is_giant := fals
 
 	var resolved_grid_cell := grid_cell.duplicate(true)
 	if resolved_grid_cell.is_empty():
-		resolved_grid_cell = _create_event_preview_grid_cell(lane, angle)
+		resolved_grid_cell = _create_event_preview_grid_cell(lane, angle, event_type)
 	var start_x := _resolve_event_spawn_x(event_type, lane, resolved_grid_cell, spawn_x)
 	var start_angle := float(resolved_grid_cell.get("spawn_angle", angle))
 	var start_lane := clampi(roundi(start_x / _lane_step()), -1, 1)

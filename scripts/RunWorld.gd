@@ -5,6 +5,7 @@ signal run_finished(result: Dictionary)
 const RUN_EVENT_PREVIEW_LAYER_SCRIPT := preload("res://scripts/RunEventPreviewLayer.gd")
 const RUN_EVENT_PREVIEW_LAYER_SCENE := preload("res://scenes/ui/RunEventPreviewLayer.tscn")
 const RUN_MONSTER_PLACEHOLDER_SCENE := preload("res://scenes/monsters/RunMonsterPlaceholder.tscn")
+const PLAYER_GREYBOX_SCENE := preload("res://scenes/characters/PlayerGreybox.tscn")
 const RUN_DURATION := 600.0
 const WORLD_RADIUS := 8.0
 const EVENT_TRIGGER_ANGLE := 0.08
@@ -21,6 +22,8 @@ const MONSTER_GROUP_MAX_COUNT := 5
 const MONSTER_SCATTER_NEAR_CHANCE := 0.65
 const MONSTER_SCATTER_NEAR_RADIUS_RATIO := 0.18
 const MONSTER_SCATTER_FAR_RADIUS_RATIO := 0.55
+const PLAYER_HEIGHT := 1.7
+const PLAYER_SURFACE_OFFSET := 0.02
 const NORMAL_MONSTER_MIN_SCALE := 1.1
 const NORMAL_MONSTER_MAX_SCALE := 1.5
 const EVENT_SPAWN_ANGLE := -1.05
@@ -137,7 +140,7 @@ var stats := {
 }
 
 var world_mesh: MeshInstance3D
-var player_mesh: MeshInstance3D
+var player_node: Node3D
 var run_camera: Camera3D
 var event_preview_layer
 var camera_debug_timer := 0.0
@@ -321,13 +324,8 @@ func _build_world() -> void:
 	add_child(world_mesh)
 	_add_surface_grid()
 
-	player_mesh = MeshInstance3D.new()
-	var capsule := CapsuleMesh.new()
-	capsule.radius = 0.28
-	capsule.height = 0.95
-	player_mesh.mesh = capsule
-	player_mesh.material_override = _material(Color(0.15, 0.45, 0.95))
-	add_child(player_mesh)
+	player_node = PLAYER_GREYBOX_SCENE.instantiate() as Node3D
+	add_child(player_node)
 
 	run_camera = Camera3D.new()
 	add_child(run_camera)
@@ -515,7 +513,7 @@ func _get_camera_surface_anchor() -> Vector3:
 	var planet_center := Vector3.ZERO
 	var player_position := _get_gameplay_player_position()
 	if player_position.distance_squared_to(planet_center) < 0.001:
-		player_position = Vector3(0, current_world_radius + 0.55, 0)
+		player_position = Vector3(0, current_world_radius + PLAYER_HEIGHT * 0.5, 0)
 
 	var player_surface_normal := (player_position - planet_center).normalized()
 	var toward_center := -player_surface_normal
@@ -524,13 +522,13 @@ func _get_camera_surface_anchor() -> Vector3:
 
 func _get_gameplay_player_position() -> Vector3:
 	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - lane_target * lane_target, 0.0))
-	return Vector3(lane_target, local_radius + 0.55, 0.0)
+	return Vector3(lane_target, local_radius + PLAYER_HEIGHT * 0.5, 0.0)
 
 
 func _get_visual_player_position() -> Vector3:
 	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - lane_target * lane_target, 0.0))
 	var angle := -current_player_visual_forward_angle
-	return Vector3(lane_target, cos(angle) * local_radius + 0.55, sin(angle) * local_radius)
+	return Vector3(lane_target, cos(angle) * local_radius + PLAYER_SURFACE_OFFSET, sin(angle) * local_radius)
 
 
 func _camera_height_for_distance(distance: float) -> float:
@@ -740,8 +738,8 @@ func _update_events(delta: float) -> void:
 
 func _update_visuals(delta: float) -> void:
 	world_mesh.rotate_x(delta * current_world_rotation_speed)
-	player_mesh.position = _get_visual_player_position()
-	player_mesh.rotation_degrees.z = -lane_target * 4.0
+	player_node.position = _get_visual_player_position()
+	player_node.rotation_degrees.z = -lane_target * 4.0
 	if run_camera:
 		_solve_camera_composition(run_camera)
 		_sync_event_preview_layer(delta)

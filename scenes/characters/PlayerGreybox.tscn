@@ -1,0 +1,13 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" uid="uid://bpw2bxmg51fak" path="res://assets/models/characters/AE_TestCharacter_Grey_Final.glb" id="1_player_model"]
+
+[node name="PlayerGreybox" type="Node3D"]
+
+[node name="CollisionRoot" type="Node3D" parent="."]
+
+[node name="LogicRoot" type="Node3D" parent="."]
+
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="AE_TestCharacter_Grey_Final" parent="VisualRoot" instance=ExtResource("1_player_model")]

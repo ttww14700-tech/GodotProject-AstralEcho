@@ -39,6 +39,8 @@ const WORLD_SIZE_OPTIONS := [
 @export var giant_monster_surface_speed := 1.04
 @export var slow_down_multiplier := 0.4
 @export var equipment_speed_multiplier := 1.0
+@export var controlled_surface_speed_multiplier := 1.35
+@export var uncontrolled_surface_speed_multiplier := 1.0
 @export var camera_preset := "SmallPlanetSurfaceArcView"
 @export var camera_target_mode := "PlayerSurfaceAnchor"
 @export var camera_distance_ratio := 2.05
@@ -50,6 +52,8 @@ const WORLD_SIZE_OPTIONS := [
 @export var player_visual_forward_angle_max := 0.18
 @export var player_visual_backward_angle_max := 0.06
 @export var player_visual_forward_shift_speed := 3.33
+@export var player_lateral_facing_yaw_deg := 18.0
+@export var player_lateral_facing_lerp_speed := 8.0
 @export var lane_dash_double_tap_window := 0.28
 @export var lane_dash_distance_ratio := 0.5
 @export var lane_dash_duration := 0.18
@@ -83,8 +87,8 @@ const WORLD_SIZE_OPTIONS := [
 @export var event_point_lateral_grid_cells := 2.0
 @export var event_preview_grid_safe_screen_x_min := 0.08
 @export var event_preview_grid_safe_screen_x_max := 0.92
-@export var event_preview_projection_blend := 0.45
-@export var event_preview_projection_compression := 0.60
+@export var event_preview_projection_blend := 1.0
+@export var event_preview_projection_compression := 1.0
 @export var event_preview_min_screen_x := 0.14
 @export var event_preview_max_screen_x := 0.86
 
@@ -107,6 +111,8 @@ var event_serial := 0
 var preview_event_serial := 0
 var preview_group_serial := 0
 var control_scheme := "keyboard"
+var is_player_controlling := false
+var player_control_source := "無"
 var current_surface_speed := 0.0
 var current_world_rotation_speed := 0.0
 var fps_display := 0.0
@@ -117,6 +123,7 @@ var current_world_scale := 1.0
 var current_world_radius := WORLD_RADIUS
 var camera_reference_radius := WORLD_RADIUS
 var current_player_visual_forward_angle := 0.0
+var current_player_visual_yaw_deg := 0.0
 var last_left_tap_time := -999.0
 var last_right_tap_time := -999.0
 var lane_dash_elapsed := 0.0
@@ -140,7 +147,9 @@ var stats := {
 }
 
 var world_mesh: MeshInstance3D
+var world_visual_root: Node3D
 var player_node: Node3D
+var player_visual_root: Node3D
 var run_camera: Camera3D
 var event_preview_layer
 var camera_debug_timer := 0.0
@@ -304,7 +313,7 @@ func _event_preview_grid_cell_label(grid_cell: Dictionary) -> String:
 
 func _event_preview_grid_world_position(grid_x: float, angle: float) -> Vector3:
 	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - grid_x * grid_x, 0.0))
-	return Vector3(grid_x, cos(angle) * local_radius + 0.18, sin(angle) * local_radius)
+	return _to_player_centered_visual_position(Vector3(grid_x, cos(angle) * local_radius + 0.18, sin(angle) * local_radius))
 
 
 func _event_preview_forward_band(raw_progress: float) -> int:
@@ -313,6 +322,10 @@ func _event_preview_forward_band(raw_progress: float) -> int:
 
 
 func _build_world() -> void:
+	world_visual_root = Node3D.new()
+	world_visual_root.name = "RunWorldVisualRoot"
+	add_child(world_visual_root)
+
 	world_mesh = MeshInstance3D.new()
 	var sphere := SphereMesh.new()
 	sphere.radius = current_world_radius
@@ -321,11 +334,12 @@ func _build_world() -> void:
 	sphere.rings = 24
 	world_mesh.mesh = sphere
 	world_mesh.material_override = _material(Color(0.36, 0.38, 0.4))
-	add_child(world_mesh)
+	world_visual_root.add_child(world_mesh)
 	_add_surface_grid()
 
 	player_node = PLAYER_GREYBOX_SCENE.instantiate() as Node3D
 	add_child(player_node)
+	player_visual_root = player_node.get_node_or_null("VisualRoot") as Node3D
 
 	run_camera = Camera3D.new()
 	add_child(run_camera)
@@ -521,14 +535,21 @@ func _get_camera_surface_anchor() -> Vector3:
 
 
 func _get_gameplay_player_position() -> Vector3:
-	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - lane_target * lane_target, 0.0))
-	return Vector3(lane_target, local_radius + PLAYER_HEIGHT * 0.5, 0.0)
+	return Vector3(0.0, current_world_radius + PLAYER_HEIGHT * 0.5, 0.0)
 
 
 func _get_visual_player_position() -> Vector3:
-	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - lane_target * lane_target, 0.0))
-	var angle := -current_player_visual_forward_angle
-	return Vector3(lane_target, cos(angle) * local_radius + PLAYER_SURFACE_OFFSET, sin(angle) * local_radius)
+	return Vector3(0.0, current_world_radius + PLAYER_SURFACE_OFFSET, 0.0)
+
+
+func _get_lateral_visual_axis_angle() -> float:
+	var clamped_lane_target := clampf(lane_target, -current_world_radius + 0.001, current_world_radius - 0.001)
+	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - clamped_lane_target * clamped_lane_target, 0.0))
+	return atan2(clamped_lane_target, local_radius)
+
+
+func _to_player_centered_visual_position(logical_position: Vector3) -> Vector3:
+	return logical_position.rotated(Vector3(0.0, 0.0, 1.0), _get_lateral_visual_axis_angle())
 
 
 func _camera_height_for_distance(distance: float) -> float:
@@ -590,7 +611,7 @@ func _build_hud() -> void:
 	layer.add_child(controls_panel)
 
 	var controls := Label.new()
-	controls.text = "基礎操作\nA/D 或 ←/→：左右移動，雙擊 A/D 可短距離閃避\nW：長按前移角色視覺\nS：長按減速並後退角色視覺\nSpace：迴避閃過事件\nF：使用技能\nB：提前撤退"
+	controls.text = "基礎操作\nW：控制中，球體加速旋轉\nA/D 或 ←/→：左右控制，角色保持中心，球體偏軸\n雙擊 A/D：短距離閃避\nS：慢速，不算控制中\nSpace：迴避閃過事件\nF：使用技能\nB：提前撤退"
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	controls_panel.add_child(controls)
 
@@ -599,6 +620,7 @@ func _build_hud() -> void:
 
 func _handle_input(delta: float) -> void:
 	_handle_lane_dash_taps()
+	_update_player_control_state()
 	if lane_dash_elapsed > 0.0:
 		_update_lane_dash(delta)
 		return
@@ -620,6 +642,20 @@ func _handle_input(delta: float) -> void:
 		_log("使用技能：短時間降低怪物成本並提高收益。")
 	if Input.is_action_just_pressed("retreat"):
 		_finish_run("提前撤退")
+
+
+func _update_player_control_state() -> void:
+	var is_lateral_control := Input.is_action_pressed("move_left") or Input.is_action_pressed("move_right")
+	var is_forward_control := Input.is_action_pressed("camera_push_forward")
+	is_player_controlling = is_lateral_control or is_forward_control
+	if is_lateral_control and is_forward_control:
+		player_control_source = "前進+左右"
+	elif is_forward_control:
+		player_control_source = "前進"
+	elif is_lateral_control:
+		player_control_source = "左右"
+	else:
+		player_control_source = "無"
 
 
 func _handle_lane_dash_taps() -> void:
@@ -691,12 +727,13 @@ func _update_timers(delta: float) -> void:
 
 
 func _update_player_visual_forward(delta: float) -> void:
-	var target := 0.0
-	if Input.is_action_pressed("slow_down"):
-		target = -player_visual_backward_angle_max
-	elif Input.is_action_pressed("camera_push_forward"):
-		target = player_visual_forward_angle_max
-	current_player_visual_forward_angle = move_toward(current_player_visual_forward_angle, target, player_visual_forward_shift_speed * delta)
+	current_player_visual_forward_angle = 0.0
+	var lateral_axis := Input.get_axis("move_left", "move_right")
+	var target_yaw := -lateral_axis * player_lateral_facing_yaw_deg
+	var yaw_alpha := clampf(1.0 - exp(-player_lateral_facing_lerp_speed * delta), 0.0, 1.0)
+	current_player_visual_yaw_deg = lerpf(current_player_visual_yaw_deg, target_yaw, yaw_alpha)
+	if is_instance_valid(player_visual_root):
+		player_visual_root.rotation_degrees.y = current_player_visual_yaw_deg
 
 
 func _update_run(delta: float) -> void:
@@ -738,8 +775,9 @@ func _update_events(delta: float) -> void:
 
 func _update_visuals(delta: float) -> void:
 	world_mesh.rotate_x(delta * current_world_rotation_speed)
+	world_visual_root.rotation.z = _get_lateral_visual_axis_angle()
 	player_node.position = _get_visual_player_position()
-	player_node.rotation_degrees.z = -lane_target * 4.0
+	player_node.rotation_degrees = Vector3.ZERO
 	if run_camera:
 		_solve_camera_composition(run_camera)
 		_sync_event_preview_layer(delta)
@@ -934,6 +972,7 @@ func _update_world_rotation_speed() -> void:
 
 func _get_surface_speed_multiplier() -> float:
 	var multiplier := equipment_speed_multiplier
+	multiplier *= controlled_surface_speed_multiplier if is_player_controlling else uncontrolled_surface_speed_multiplier
 	if Input.is_action_pressed("slow_down"):
 		multiplier *= slow_down_multiplier
 	return multiplier
@@ -1013,10 +1052,11 @@ func _print_camera_debug(camera: Camera3D) -> void:
 
 func _update_hud() -> void:
 	var module_name: String = GameState.get_selected_module_data()["name"]
-	var control_text := "鍵盤" if control_scheme == "keyboard" else "滑鼠"
+	var control_mode_text := "控制中" if is_player_controlling else "未控制"
 	var slow_text := "慢速中" if Input.is_action_pressed("slow_down") else "一般"
 	var surface_speed_multiplier := _get_surface_speed_multiplier()
-	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n球體 %s x%.1f / 半徑 %.2f / surface倍率 %.0f%% / surface %.2f / angular %.4f\nlane_target %.3f / player_lane %d / grid_center_offset %.3f / lane_offset %.3f\nFPS %.0f / 最低 %.0f / 場上事件 %d / 預告事件 %d / 怪物 %d+%d\n控制 %s / 速度 %s / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
+	var lateral_axis_angle_deg := rad_to_deg(_get_lateral_visual_axis_angle())
+	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n球體 %s x%.1f / 半徑 %.2f / 速度倍率 %.0f%% / surface %.2f / angular %.4f\n模式 %s / 輸入 %s / 速度 %s / 偏軸角度 %.1f° / 角色朝向 %.1f°\n邏輯左右偏移 %.3f / player_lane %d / grid_center_offset %.3f / lane_offset %.3f\nFPS %.0f / 最低 %.0f / 場上事件 %d / 預告事件 %d / 怪物 %d+%d / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
 		_format_time(elapsed),
 		concentration,
 		resonance_gained,
@@ -1029,6 +1069,11 @@ func _update_hud() -> void:
 		surface_speed_multiplier * 100.0,
 		current_surface_speed,
 		current_world_rotation_speed,
+		control_mode_text,
+		player_control_source,
+		slow_text,
+		lateral_axis_angle_deg,
+		current_player_visual_yaw_deg,
 		lane_target,
 		player_lane,
 		_grid_center_offset(),
@@ -1039,8 +1084,6 @@ func _update_hud() -> void:
 		preview_event_queue.size(),
 		_count_active_events_of_type("monster"),
 		_count_preview_events_of_type("monster"),
-		control_text,
-		slow_text,
 		dodge_cooldown,
 		skill_cooldown,
 		"危險期" if entered_danger else "穩定期"
@@ -1212,11 +1255,11 @@ func _position_event(event: Dictionary) -> void:
 	var local_radius := sqrt(maxf(current_world_radius * current_world_radius - x * x, 0.0))
 	var angle: float = event["angle"]
 	var marker := event["node"] as Node3D
-	marker.position = Vector3(x, cos(angle) * local_radius + 0.18, sin(angle) * local_radius)
+	marker.position = _to_player_centered_visual_position(Vector3(x, cos(angle) * local_radius + 0.18, sin(angle) * local_radius))
 	if event["type"] == "monster" and marker.has_method("update_player_face_detection"):
 		marker.call("update_player_face_detection", _get_gameplay_player_position())
 	else:
-		marker.look_at(Vector3(x, 0, 0), Vector3.UP)
+		marker.look_at(_to_player_centered_visual_position(Vector3(x, 0, 0)), Vector3.UP)
 
 
 func _print_event_preview_active_spawn_debug(event: Dictionary) -> void:

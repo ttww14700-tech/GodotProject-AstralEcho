@@ -1,5 +1,6 @@
 extends CharacterBody3D
 
+@export var use_original_model_materials := true
 @export var greybox_albedo := Color(0.72, 0.74, 0.76, 1.0)
 @export var greybox_roughness := 0.72
 
@@ -7,7 +8,8 @@ var _greybox_material: StandardMaterial3D
 
 
 func _ready() -> void:
-	_apply_greybox_material()
+	if not use_original_model_materials:
+		_apply_greybox_material()
 
 
 func _apply_greybox_material() -> void:

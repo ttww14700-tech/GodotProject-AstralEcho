@@ -1,12 +1,14 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="PackedScene" uid="uid://bpw2bxmg51fak" path="res://assets/models/characters/AE_TestCharacter_Grey_Final.glb" id="1_player_model"]
+[ext_resource type="Script" path="res://scripts/PlayerGreybox.gd" id="1_player_script"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_player_collision"]
 radius = 0.3
 height = 1.7
 
 [node name="PlayerGreybox" type="CharacterBody3D"]
+script = ExtResource("1_player_script")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.85, 0)
@@ -15,5 +17,7 @@ shape = SubResource("CapsuleShape3D_player_collision")
 [node name="LogicRoot" type="Node3D" parent="."]
 
 [node name="VisualRoot" type="Node3D" parent="."]
+transform = Transform3D(1.7, 0, 0, 0, 1.7, 0, 0, 0, 1.7, 0, 0, 0)
 
 [node name="AE_TestCharacter_Grey_Final" parent="VisualRoot" instance=ExtResource("1_player_model")]
+transform = Transform3D(-1, 0, -8.74228e-08, 0, 1, 0, 8.74228e-08, 0, -1, 0, 0, 0)

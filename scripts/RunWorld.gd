@@ -11,7 +11,7 @@ const WORLD_RADIUS := 8.0
 const EVENT_TRIGGER_ANGLE := 0.08
 const EVENT_EXPIRE_ANGLE := 0.45
 const LANE_STEP := 4.4
-const PLAYER_MOVE_LIMIT := 5.2
+const PLAYER_MOVE_LIMIT := 6.6
 const LATERAL_SPEED := 3.2
 const MONSTER_CHASE_SPEED := 0.8
 const GRID_RADIUS_OFFSET := 0.018
@@ -39,7 +39,7 @@ const WORLD_SIZE_OPTIONS := [
 @export var giant_monster_surface_speed := 1.04
 @export var slow_down_multiplier := 0.4
 @export var equipment_speed_multiplier := 1.0
-@export var controlled_surface_speed_multiplier := 1.35
+@export var controlled_surface_speed_multiplier := 1.3
 @export var uncontrolled_surface_speed_multiplier := 1.0
 @export var camera_preset := "SmallPlanetSurfaceArcView"
 @export var camera_target_mode := "PlayerSurfaceAnchor"
@@ -52,7 +52,7 @@ const WORLD_SIZE_OPTIONS := [
 @export var player_visual_forward_angle_max := 0.18
 @export var player_visual_backward_angle_max := 0.06
 @export var player_visual_forward_shift_speed := 3.33
-@export var player_lateral_facing_yaw_deg := 18.0
+@export var player_lateral_facing_yaw_deg := 14.0
 @export var player_lateral_facing_lerp_speed := 8.0
 @export var lane_dash_double_tap_window := 0.28
 @export var lane_dash_distance_ratio := 0.5
@@ -1208,6 +1208,8 @@ func _create_event(event_type: String, lane: int, angle: float, is_giant := fals
 	}
 	active_events.append(event)
 	_position_event(event)
+	if event_type == "monster" and marker.has_method("face_toward_global_position"):
+		marker.call("face_toward_global_position", _get_gameplay_player_position())
 	_print_event_preview_active_spawn_debug(event)
 
 

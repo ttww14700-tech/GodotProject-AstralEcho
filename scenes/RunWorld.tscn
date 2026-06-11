@@ -5,7 +5,7 @@
 [node name="RunWorld" type="Node3D" unique_id=687037308]
 transform = Transform3D(0.9996416, 0.026770152, 0, -0.026770152, 0.9996416, 0, 0, 0, 1, 0, 0, 0)
 script = ExtResource("1")
-base_surface_speed = 5.0
+base_surface_speed = 3.5
 camera_distance_ratio = 2.25
 camera_height_ratio = 1.05
 camera_pitch_deg = 32.0

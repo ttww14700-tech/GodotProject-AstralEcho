@@ -1,7 +1,7 @@
 extends Node3D
 
-const FACE_DETECTION_RADIUS_MULTIPLIER := 4.0
-const MIN_FACE_DETECTION_DISTANCE := 3.0
+const FACE_DETECTION_RADIUS_MULTIPLIER := 6.0
+const MIN_FACE_DETECTION_DISTANCE := 8.0
 # Placeholder temporary value only; formal monsters should provide reliable collision shapes.
 const PLACEHOLDER_FALLBACK_COLLISION_RADIUS := 0.6
 
@@ -37,11 +37,15 @@ func configure(size_multiplier: float, show_forward_debug_value: bool) -> void:
 
 
 func face_toward_global_position(target_position: Vector3) -> void:
-	var flat_target := target_position
-	flat_target.y = global_position.y
-	if global_position.distance_squared_to(flat_target) < 0.0001:
+	var forward := target_position - global_position
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
 		return
-	look_at(flat_target, Vector3.UP)
+	forward = forward.normalized()
+	var right := forward.cross(Vector3.UP).normalized()
+	var up := right.cross(forward).normalized()
+	var current_scale := global_transform.basis.get_scale()
+	global_transform.basis = Basis(right, up, -forward).scaled(current_scale)
 
 
 func get_forward_direction() -> Vector3:

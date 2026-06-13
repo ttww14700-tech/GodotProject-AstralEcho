@@ -23,6 +23,8 @@ const PLACEHOLDER_FALLBACK_COLLISION_RADIUS := 0.6
 var current_player_distance := INF
 var current_face_detection_distance := 0.0
 var is_player_within_face_detection_distance := false
+var _cached_collision_radius := -1.0
+var _cached_face_detection_distance := -1.0
 
 
 func _ready() -> void:
@@ -33,6 +35,7 @@ func _ready() -> void:
 
 func configure(size_multiplier: float, show_forward_debug_value: bool) -> void:
 	scale = Vector3.ONE * maxf(size_multiplier, 0.001)
+	_invalidate_detection_cache()
 	show_forward_debug = show_forward_debug_value
 
 
@@ -62,16 +65,22 @@ func update_player_face_detection(player_position: Vector3, should_turn_when_det
 
 
 func get_collision_radius() -> float:
+	if _cached_collision_radius > 0.0:
+		return _cached_collision_radius
 	var radius := 0.0
 	for collision_shape in _collect_collision_shapes():
 		radius = maxf(radius, _collision_shape_horizontal_radius(collision_shape))
 	if radius <= 0.0:
-		return PLACEHOLDER_FALLBACK_COLLISION_RADIUS * _global_horizontal_scale(self)
-	return radius
+		radius = PLACEHOLDER_FALLBACK_COLLISION_RADIUS * _global_horizontal_scale(self)
+	_cached_collision_radius = radius
+	return _cached_collision_radius
 
 
 func get_face_detection_distance() -> float:
-	return maxf(get_collision_radius() * FACE_DETECTION_RADIUS_MULTIPLIER, MIN_FACE_DETECTION_DISTANCE)
+	if _cached_face_detection_distance > 0.0:
+		return _cached_face_detection_distance
+	_cached_face_detection_distance = maxf(get_collision_radius() * FACE_DETECTION_RADIUS_MULTIPLIER, MIN_FACE_DETECTION_DISTANCE)
+	return _cached_face_detection_distance
 
 
 func get_current_player_distance() -> float:
@@ -109,6 +118,11 @@ func _collect_collision_shapes() -> Array[CollisionShape3D]:
 		if collision_shape and collision_shape.shape:
 			shapes.append(collision_shape)
 	return shapes
+
+
+func _invalidate_detection_cache() -> void:
+	_cached_collision_radius = -1.0
+	_cached_face_detection_distance = -1.0
 
 
 func _collision_shape_horizontal_radius(collision_shape: CollisionShape3D) -> float:

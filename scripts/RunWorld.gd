@@ -47,6 +47,7 @@ const WORLD_SIZE_OPTIONS := [
 @export var camera_height_ratio := 0.9
 @export var camera_pitch_deg := 24.0
 @export var camera_target_toward_center_ratio := 0.25
+@export var camera_debug_enabled := false
 @export var planet_top_screen_y := 0.56
 @export var player_screen_y := 0.62
 @export var player_visual_forward_angle_max := 0.18
@@ -58,6 +59,8 @@ const WORLD_SIZE_OPTIONS := [
 @export var lane_dash_distance_ratio := 0.5
 @export var lane_dash_duration := 0.18
 @export var lane_dash_cooldown_duration := 0.45
+@export var attack_duration := 0.58
+@export var attack_cooldown_duration := 0.12
 @export var planet_visible_height_ratio := 0.58
 @export var camera_fov := 48.0
 @export var surface_grid_cube_face_subdivisions := 12
@@ -106,6 +109,8 @@ var dodge_timer := 0.0
 var dodge_cooldown := 0.0
 var skill_timer := 0.0
 var skill_cooldown := 0.0
+var attack_timer := 0.0
+var attack_cooldown := 0.0
 var spawn_timer := 2.0
 var event_serial := 0
 var preview_event_serial := 0
@@ -634,7 +639,7 @@ func _build_hud() -> void:
 	layer.add_child(controls_panel)
 
 	var controls := Label.new()
-	controls.text = "基礎操作\nW：控制中，球體加速旋轉\nA/D 或 ←/→：左右控制，角色保持中心，球體偏軸\n雙擊 A/D：短距離閃避\nS：慢速，不算控制中\nSpace：迴避閃過事件\nF：使用技能\nB：提前撤退"
+	controls.text = "基礎操作\nW：控制中，球體加速旋轉\nA/D 或 ←/→：左右控制，角色保持中心，球體偏軸\n雙擊 A/D：短距離閃避\nS：慢速，不算控制中\n滑鼠左鍵：右手揮砍\nSpace：迴避閃過事件\nF：使用技能\nB：提前撤退"
 	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	controls_panel.add_child(controls)
 
@@ -663,6 +668,10 @@ func _handle_input(delta: float) -> void:
 		skill_cooldown = 7.0
 		stats["skill_uses"] += 1
 		_log("使用技能：短時間降低怪物成本並提高收益。")
+	if Input.is_action_just_pressed("attack") and attack_timer <= 0.0 and attack_cooldown <= 0.0:
+		attack_timer = maxf(attack_duration, 0.001)
+		attack_cooldown = attack_timer + attack_cooldown_duration
+		_log("攻擊：右手向前揮砍。")
 	if Input.is_action_just_pressed("retreat"):
 		_finish_run("提前撤退")
 
@@ -741,21 +750,62 @@ func set_lane_dash_modifiers(distance_multiplier := 1.0, duration_multiplier := 
 	lane_dash_cooldown_multiplier = maxf(cooldown_multiplier, 0.0)
 
 
+func _get_attack_progress() -> float:
+	var duration := maxf(attack_duration, 0.001)
+	return clampf(1.0 - attack_timer / duration, 0.0, 1.0)
+
+
 func _update_timers(delta: float) -> void:
 	dodge_timer = maxf(dodge_timer - delta, 0.0)
 	dodge_cooldown = maxf(dodge_cooldown - delta, 0.0)
 	skill_timer = maxf(skill_timer - delta, 0.0)
 	skill_cooldown = maxf(skill_cooldown - delta, 0.0)
+	attack_timer = maxf(attack_timer - delta, 0.0)
+	attack_cooldown = maxf(attack_cooldown - delta, 0.0)
 	lane_dash_cooldown = maxf(lane_dash_cooldown - delta, 0.0)
 
 
 func _update_player_visual_forward(delta: float) -> void:
-	current_player_visual_forward_angle = 0.0
 	var lateral_axis := Input.get_axis("move_left", "move_right")
-	var target_yaw := -lateral_axis * player_lateral_facing_yaw_deg
+	var lane_dash_direction := 0.0
+	if lane_dash_elapsed > 0.0 and not is_equal_approx(lane_dash_target, lane_dash_start):
+		lane_dash_direction = signf(lane_dash_target - lane_dash_start)
+	var visual_lateral_axis := lateral_axis
+	if is_zero_approx(visual_lateral_axis) and not is_zero_approx(lane_dash_direction):
+		visual_lateral_axis = lane_dash_direction
+
+	var forward_axis := 0.0
+	if Input.is_action_pressed("slow_down"):
+		forward_axis = -1.0
+	elif Input.is_action_pressed("camera_push_forward"):
+		forward_axis = 1.0
+	var forward_angle_limit := player_visual_forward_angle_max if forward_axis >= 0.0 else player_visual_backward_angle_max
+	var target_forward_angle := forward_axis * forward_angle_limit
+	var forward_alpha := clampf(1.0 - exp(-player_visual_forward_shift_speed * delta), 0.0, 1.0)
+	current_player_visual_forward_angle = lerpf(current_player_visual_forward_angle, target_forward_angle, forward_alpha)
+
+	var target_yaw := -visual_lateral_axis * player_lateral_facing_yaw_deg
 	var yaw_alpha := clampf(1.0 - exp(-player_lateral_facing_lerp_speed * delta), 0.0, 1.0)
 	current_player_visual_yaw_deg = lerpf(current_player_visual_yaw_deg, target_yaw, yaw_alpha)
-	if is_instance_valid(player_visual_root):
+
+	if is_instance_valid(player_node) and player_node.has_method("update_run_visual_state"):
+		var speed_ratio := current_surface_speed / maxf(base_surface_speed, 0.001)
+		player_node.call(
+			"update_run_visual_state",
+			delta,
+			lateral_axis,
+			forward_axis,
+			speed_ratio,
+			is_player_controlling,
+			lane_dash_elapsed > 0.0,
+			lane_dash_direction,
+			dodge_timer > 0.0,
+			skill_timer > 0.0,
+			attack_timer > 0.0,
+			_get_attack_progress(),
+			current_player_visual_yaw_deg
+		)
+	elif is_instance_valid(player_visual_root):
 		player_visual_root.rotation_degrees.y = current_player_visual_yaw_deg
 
 
@@ -1061,6 +1111,8 @@ func _measure_planet_top_screen_y(camera: Camera3D) -> float:
 
 
 func _print_camera_debug(camera: Camera3D) -> void:
+	if not camera_debug_enabled:
+		return
 	camera_debug_timer -= get_process_delta_time()
 	if camera_debug_timer > 0.0:
 		return
@@ -1079,7 +1131,7 @@ func _update_hud() -> void:
 	var slow_text := "慢速中" if Input.is_action_pressed("slow_down") else "一般"
 	var surface_speed_multiplier := _get_surface_speed_multiplier()
 	var lateral_axis_angle_deg := rad_to_deg(_get_lateral_visual_axis_angle())
-	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n球體 %s x%.1f / 半徑 %.2f / 速度倍率 %.0f%% / surface %.2f / angular %.4f\n模式 %s / 輸入 %s / 速度 %s / 偏軸角度 %.1f° / 角色朝向 %.1f°\n邏輯左右偏移 %.3f / player_lane %d / grid_center_offset %.3f / lane_offset %.3f\nFPS %.0f / 最低 %.0f / 場上事件 %d / 預告事件 %d / 怪物 %d+%d / 迴避 %.1fs / 技能 %.1fs / 狀態 %s" % [
+	hud_label.text = "時間 %s / 濃度 %.1f%% / 本輪共鳴 +%.1f%% / 資源 %d / 礦點 %d / 模組 %s\n球體 %s x%.1f / 半徑 %.2f / 速度倍率 %.0f%% / surface %.2f / angular %.4f\n模式 %s / 輸入 %s / 速度 %s / 偏軸角度 %.1f° / 角色朝向 %.1f°\n邏輯左右偏移 %.3f / player_lane %d / grid_center_offset %.3f / lane_offset %.3f\nFPS %.0f / 最低 %.0f / 場上事件 %d / 預告事件 %d / 怪物 %d+%d / 迴避 %.1fs / 技能 %.1fs / 攻擊 %.1fs / 狀態 %s" % [
 		_format_time(elapsed),
 		concentration,
 		resonance_gained,
@@ -1109,6 +1161,7 @@ func _update_hud() -> void:
 		_count_preview_events_of_type("monster"),
 		dodge_cooldown,
 		skill_cooldown,
+		attack_timer,
 		"危險期" if entered_danger else "穩定期"
 	]
 
